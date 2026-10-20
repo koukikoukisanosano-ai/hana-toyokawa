@@ -4,37 +4,45 @@
   "f_digit",
   "f_wday",
   "f_special",
-  "f_seq3",
+  "f_unit",
+  "f_streak",
   "h_digit",
   "h_wday"
  ],
  "unit_factors": [
-  "f_seq3"
+  "f_unit",
+  "f_streak"
  ],
- "score": 0.1102,
- "base_score": -0.0141,
+ "score": 0.0319,
+ "base_score": 0.0,
  "steps": [
   {
-   "add": "f_seq3",
-   "label": "3日前→前日の判定の流れ",
-   "gain": 0.1242
+   "add": "f_unit",
+   "label": "台ごとの入りやすさ",
+   "gain": 0.0236
+  },
+  {
+   "add": "f_streak",
+   "label": "連続凹み日数",
+   "gain": 0.0083
   }
  ],
  "single": {
-  "f_seq2": 0.021,
-  "f_seq3": 0.1242,
-  "f_unit": -0.0147,
-  "f_udigit": 0.0598,
-  "f_match": 0.1117,
-  "f_corner": 0.0033,
-  "f_prevdiff": 0.0002,
-  "f_prevhigh": 0.0476,
-  "f_streak": -0.027,
-  "f_recent": 0.0174,
-  "f_busy": -0.0151
+  "f_seq2": 0.0021,
+  "f_seq3": 0.0115,
+  "f_unit": 0.0236,
+  "f_udigit": 0.0067,
+  "f_match": 0.0052,
+  "f_corner": 0.0056,
+  "f_prevdiff": 0.0095,
+  "f_prevhigh": 0.0167,
+  "f_streak": 0.0119,
+  "f_recent": -0.0223,
+  "f_busy": 0.0151
  },
  "test_days": 90,
- "n_days": 246,
+ "n_days": 259,
  "top_k": 5,
- "when": "2026-10-21"
+ "when": "2026-10-21",
+ "goal": "rank"
 }
