@@ -4,36 +4,37 @@
   "f_digit",
   "f_wday",
   "f_special",
-  "f_seq2",
+  "f_seq3",
   "h_digit",
   "h_wday"
  ],
  "unit_factors": [
-  "f_seq2"
+  "f_seq3"
  ],
- "score": 0.0076,
- "base_score": 0.0006,
+ "score": 0.1102,
+ "base_score": -0.0141,
  "steps": [
   {
-   "add": "f_seq2",
-   "label": "2日前→前日の判定の流れ",
-   "gain": 0.007
+   "add": "f_seq3",
+   "label": "3日前→前日の判定の流れ",
+   "gain": 0.1242
   }
  ],
  "single": {
-  "f_seq2": 0.007,
-  "f_seq3": -0.0005,
-  "f_unit": -0.0026,
-  "f_udigit": -0.0029,
-  "f_match": 0.0015,
-  "f_corner": -0.0008,
-  "f_prevdiff": -0.0041,
-  "f_prevhigh": 0.0012,
-  "f_streak": -0.0035,
-  "f_recent": -0.0044
+  "f_seq2": 0.021,
+  "f_seq3": 0.1242,
+  "f_unit": -0.0147,
+  "f_udigit": 0.0598,
+  "f_match": 0.1117,
+  "f_corner": 0.0033,
+  "f_prevdiff": 0.0002,
+  "f_prevhigh": 0.0476,
+  "f_streak": -0.027,
+  "f_recent": 0.0174,
+  "f_busy": -0.0151
  },
  "test_days": 90,
- "n_days": 202,
+ "n_days": 246,
  "top_k": 5,
  "when": "2026-10-21"
 }
