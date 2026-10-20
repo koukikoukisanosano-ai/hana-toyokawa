@@ -81,7 +81,7 @@ def debug_dump(html: str, url: str) -> dict:
     heads = [[th.get_text(strip=True) for th in t.find_all("th")][:8] for t in soup.find_all("table")][:15]
     return {"url": url, "len": len(html), "title": soup.title.get_text() if soup.title else "",
             "kishu_links": kishu[:120], "table_heads": heads,
-            "text": soup.get_text(" ", strip=True)[:3000]}
+            "text": soup.get_text(" ", strip=True)[:3000], "raw": html[:1500]}
 
 
 def parse_day_models(html: str, keyword: str) -> tuple[list[str], list[dict]]:
@@ -207,10 +207,27 @@ class MinRepo:
 
     def fetch_day(self, date: str, url: str, precise: bool, coef=DEFAULT_COEF) -> int:
         html = self.f.get(url, referer=self.tag_url, interval=self.interval)
+        if len(html) < 3000:
+            self._dump(html, url)
+            raise RateLimited(f"日別ページの中身が空（{len(html)}文字） {url}")
         date = post_date(html, date)
         models, variety = parse_day_models(html, self.kw)
-        if not models and not variety and not getattr(self, "_dumped", False):
-            self._dumped = True
+        if not models and not variety:
+            self._dump(html, url)
+        rows = []
+        for model in models:
+            kurl = f"{url.rstrip('/')}/?kishu={quote(model)}"
+            units = parse_kishu_page(self.f.get(kurl, referer=url, interval=self.interval))
+            for u in units:
+                rows.append({"date": date, "unit": u["unit"], "model": model, "games": u["games"],
+                             "diff": u["diff"], "total": u["total"]})
+        return self._finish(date, url, rows, variety, precise, coef)
+
+    def _dump(self, html: str, url: str) -> None:
+        if getattr(self, "_dumped", False):
+            return
+        self._dumped = True
+        if True:
             try:
                 import json
                 from pathlib import Path
@@ -219,13 +236,8 @@ class MinRepo:
                 dp.write_text(json.dumps(debug_dump(html, url), ensure_ascii=False, indent=1), encoding="utf-8")
             except Exception as e:
                 log.warning("調査用の記録に失敗: %s", e)
-        rows = []
-        for model in models:
-            kurl = f"{url.rstrip('/')}/?kishu={quote(model)}"
-            units = parse_kishu_page(self.f.get(kurl, referer=url, interval=self.interval))
-            for u in units:
-                rows.append({"date": date, "unit": u["unit"], "model": model, "games": u["games"],
-                             "diff": u["diff"], "total": u["total"]})
+
+    def _finish(self, date, url, rows, variety, precise, coef) -> int:
         for v in variety:
             rows.append({"date": date, "unit": v["unit"], "model": v["model"], "games": v["games"],
                          "diff": v["diff"], "total": None})
