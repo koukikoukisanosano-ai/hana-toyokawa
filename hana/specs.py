@@ -14,8 +14,11 @@ class Spec:
     name: str
     bb: tuple[float | None, ...]   # 設定1..6 のBIG確率の分母（その設定が無い機種は None）
     rb: tuple[float | None, ...]   # 設定1..6 のREG確率の分母
-    payout: tuple[float, ...]   # 設定1..6 の機械割(%)
+    payout: tuple[float | None, ...]   # 設定1..6 の機械割(%)
     verified: bool = True
+    big_coins: float | None = None     # BIG 1回の獲得枚数
+    reg_coins: float | None = None     # REG 1回の獲得枚数
+    coin_mochi: float | None = None    # コイン持ち（50枚で回せるG数）
 
     @property
     def settings(self) -> tuple[int, ...]:
@@ -38,6 +41,7 @@ SPECS: dict[str, Spec] = {
         bb=(299, 291, 281, 268, None, 253),
         rb=(496, 471, 442, 409, None, 372),
         payout=(97, 99, 101, 104, None, 108),
+        big_coins=312, reg_coins=130, coin_mochi=37.0,   # BIGはBT込み約312枚・REG約130枚・50枚約37G
     ),
     # スターハナハナ-30 公表値（REGが重い・BIGも軽め）
     "スターハナハナ": Spec(
@@ -59,6 +63,7 @@ SPECS: dict[str, Spec] = {
         bb=(292, 280, 268, 257, 244, 232),
         rb=(489, 452, 420, 390, 360, 332),
         payout=(97, 99, 101, 104, 107, 110),
+        big_coins=260, reg_coins=120, coin_mochi=39.9,   # BIG最大260枚・REG最大120枚・50枚約39.9G
     ),
 }
 

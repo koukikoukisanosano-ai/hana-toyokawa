@@ -183,10 +183,17 @@ def parse_unit_history(html: str, today: Date) -> list[dict]:
     return out
 
 
-def est_diff(bb, rb, games, coef=None) -> int | None:
-    """差枚が伏せられているとき（みんレポで ±1 や - と表示）は BB・RB・G数 から見積もる。"""
+def est_diff(bb, rb, games, model: str = "", coef=None) -> int | None:
+    """差枚が伏せられているとき（みんレポで ±1 や - と表示）は、機種ごとの
+    BIG獲得枚数・REG獲得枚数・コイン持ちから計算する:
+      差枚 ＝ BIG回数×BIG枚数 ＋ REG回数×REG枚数 − G数×(50 ÷ コイン持ち)
+    機種のスペックが未登録なら、実データで合わせた係数で見積もる。"""
     if bb is None or rb is None or games is None:
         return None
+    from ..specs import spec_for
+    sp = spec_for(model)
+    if sp.big_coins and sp.reg_coins and sp.coin_mochi:
+        return int(round(bb * sp.big_coins + rb * sp.reg_coins - games * 50.0 / sp.coin_mochi))
     a, b, c = coef or DEFAULT_COEF
     return int(round(a * bb + b * rb + c * games))
 
@@ -299,7 +306,7 @@ class MinRepo:
                             extra.setdefault(hrow["date"], []).append({
                                 "date": hrow["date"], "unit": r["unit"], "model": r["model"],
                                 "games": hrow["games"], "bb": hrow["bb"], "rb": hrow["rb"],
-                                "diff": est_diff(hrow["bb"], hrow["rb"], hrow["games"])})
+                                "diff": est_diff(hrow["bb"], hrow["rb"], hrow["games"], r["model"])})
                 except Exception as e:
                     log.debug("過去分の読み取り失敗: %s", e)
                 if info:
@@ -321,7 +328,7 @@ class MinRepo:
                     games = info.get("games") or r.get("games")
                     d2 = info.get("diff")
                     if d2 is None or abs(d2) <= 1:     # 差枚が伏せられている店
-                        d2 = est_diff(info.get("bb"), info.get("rb"), games)
+                        d2 = est_diff(info.get("bb"), info.get("rb"), games, r["model"])
                     out.append({**r, "bb": info.get("bb"), "rb": info.get("rb"), "diff": d2, "games": games})
             n = self.db.upsert_units(out, "minrepo")
             # 一緒に取れた過去日: その日の台数がそろっていれば取得済みにする
