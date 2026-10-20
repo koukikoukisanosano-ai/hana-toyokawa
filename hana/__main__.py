@@ -313,6 +313,19 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
     return res
 
 
+def run_checks(cfg, db, root: Path) -> None:
+    """要因の選び直し（週1回・データが2割増えたとき）と、予想の検証（週1回）。"""
+    try:
+        cmd_select(cfg, db, root)
+    except Exception as e:
+        log.warning("要因の選び直しでエラー（前回の選択のまま続行）: %s", e)
+    if need_backtest(root):
+        try:
+            cmd_backtest(cfg, db, root)
+        except Exception as e:
+            log.warning("検証でエラー（予想は続行）: %s", e)
+
+
 def cmd_backtest(cfg, db, root: Path, days=90, lag=None) -> dict:
     units, hall = db.units(cfg["target"].get("keyword", "ハナハナ")), db.hall_days()
     try:
@@ -574,21 +587,13 @@ def main(argv=None) -> int:
     elif a.cmd == "inbox":
         cmd_inbox(cfg, db, root)
         cmd_minrepo_sync(cfg, db, root)
-        if need_backtest(root):
-            try:
-                cmd_backtest(cfg, db, root)
-            except Exception as e:
-                log.warning("検証でエラー（予想は続行）: %s", e)
+        run_checks(cfg, db, root)
         cmd_predict(cfg, db, root, today_jst())
         write_next(cfg, db, root)
     elif a.cmd == "daily":
         cmd_inbox(cfg, db, root)
         cmd_minrepo_sync(cfg, db, root)
-        if need_backtest(root):   # 週1回（検証できるだけのデータがまだない間は毎回）
-            try:
-                cmd_backtest(cfg, db, root)
-            except Exception as e:
-                log.warning("検証でエラー（予想は続行）: %s", e)
+        run_checks(cfg, db, root)
         cmd_predict(cfg, db, root, today_jst(), cfg["predict"].get("open_browser", False))
         write_next(cfg, db, root)
     elif a.cmd == "minrepo-history":
