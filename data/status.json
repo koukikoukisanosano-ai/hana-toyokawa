@@ -1,8 +1,8 @@
 {
  "mode": "minrepo",
  "inbox_issue": 1,
- "minrepo_last": "2026-10-20 19:56",
- "minrepo_result": "ok",
- "minrepo_message": "150日分を取得・残り469日",
+ "minrepo_last": "2026-10-20 20:34",
+ "minrepo_result": "blocked",
+ "minrepo_message": "0日分を取得・残り619日",
  "minrepo_ok": "2026-10-20 19:56"
 }
