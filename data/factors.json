@@ -4,36 +4,36 @@
   "f_digit",
   "f_wday",
   "f_special",
-  "f_seq2",
+  "f_prevhigh",
   "h_digit",
   "h_wday"
  ],
  "unit_factors": [
-  "f_seq2"
+  "f_prevhigh"
  ],
- "score": 0.0072,
- "base_score": -0.0035,
+ "score": 0.003,
+ "base_score": -0.0025,
  "steps": [
   {
-   "add": "f_seq2",
-   "label": "2日前→前日の判定の流れ",
-   "gain": 0.0108
+   "add": "f_prevhigh",
+   "label": "前日の高設定挙動（据え置き）",
+   "gain": 0.0055
   }
  ],
  "single": {
-  "f_seq2": 0.0108,
-  "f_seq3": 0.0081,
-  "f_unit": -0.005,
-  "f_udigit": -0.0003,
-  "f_match": -0.0012,
-  "f_corner": 0.0009,
-  "f_prevdiff": 0.0055,
-  "f_prevhigh": 0.007,
-  "f_streak": -0.0007,
-  "f_recent": 0.0085
+  "f_seq2": 0.0047,
+  "f_seq3": 0.0048,
+  "f_unit": 0.001,
+  "f_udigit": 0.0017,
+  "f_match": -0.0013,
+  "f_corner": -0.0024,
+  "f_prevdiff": 0.0,
+  "f_prevhigh": 0.0055,
+  "f_streak": 0.0045,
+  "f_recent": -0.0024
  },
- "test_days": 49,
- "n_days": 92,
+ "test_days": 81,
+ "n_days": 124,
  "top_k": 5,
  "when": "2026-10-21"
 }
