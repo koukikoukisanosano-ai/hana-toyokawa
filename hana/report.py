@@ -44,7 +44,7 @@ tr.top td{background:color-mix(in srgb,var(--accent) 7%,var(--card))}
 .rank{font-weight:800;font-size:18px;width:42px;text-align:center}.unit{font-weight:800;font-size:20px;letter-spacing:.02em}
 .bar{position:relative;height:10px;background:var(--heat0);border-radius:5px;min-width:110px;overflow:hidden}
 .bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:5px}
-.pct{font-weight:700;font-size:16px}.ratio{color:var(--sub);font-size:12px}
+.pct{font-weight:700;font-size:16px}.pct small{font-size:11px;font-weight:400;margin-left:1px}.mark{font-size:18px}.ratio{color:var(--sub);font-size:12px}
 .chip{display:inline-block;border-radius:3px;padding:0 6px;margin:2px 4px 2px 0;font-size:12px;border:1px solid var(--line)}
 .chip.p{border-color:var(--good);color:var(--good)}.chip.m{color:var(--bad)}
 .prev{font-size:12px;color:var(--sub);white-space:normal}.prev b{color:var(--ink);font-weight:600}
@@ -104,6 +104,18 @@ def heat_class(p: float, base: float) -> str:
     r = p / base if base > 0 else 1
     return "var(--heat4)" if r >= 1.8 else "var(--heat3)" if r >= 1.4 else "var(--heat2)" if r >= 1.15 \
         else "var(--heat1)" if r >= 0.95 else "var(--heat0)"
+
+
+GRADES = [(0.10, "◎", "var(--heat4)"), (0.30, "○", "var(--heat3)"), (0.70, "△", "var(--heat1)"), (1.01, "×", "var(--heat0)")]
+
+
+def grade_of(rank: int, n: int) -> tuple[str, str]:
+    """今日の台の中での順位 → 印と色（上位10%=◎・30%=○・70%=△・それ以下=×）。"""
+    q = (rank - 0.5) / max(n, 1)
+    for lim, mark, color in GRADES:
+        if q < lim:
+            return mark, color
+    return GRADES[-1][1], GRADES[-1][2]
 
 
 def spark(vals: list[float]) -> str:
@@ -345,15 +357,25 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
                     f"BB{int(lr['bb'])}/RB{int(lr['rb'])} <b>{fmt_int(lr['diff'], True)}枚</b> "
                     f"{judge_txt(lr)}</div>")
         sp = spark(list(by_unit[u]["judge"].ffill().fillna(3).tail(10))) if u in by_unit else ""
-        width = min(100, p / max(pred["score"].max(), 1e-9) * 100)
+        lo, hi = float(pred["score"].min()), float(pred["score"].max())
+        rel = (p - lo) / (hi - lo) * 100 if hi > lo else 50.0       # 今日の台の中での位置（0〜100）
+        mark, _ = grade_of(int(r["rank"]), len(pred))
         trs.append(
             f"<tr class='{'top' if r['rank'] <= top_n else ''}'><td class='rank'>{int(r['rank'])}</td>"
             f"<td class='unit'>{u}</td>"
-            f"<td class='score'><div class='pct'>{p*100:.1f}%</div><div class='bar'><i style='width:{width:.0f}%'></i></div>"
-            f"<div class='ratio'>平常の×{ratio:.2f}</div></td><td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
+            f"<td class='score'><div class='pct'><span class='mark'>{mark}</span> {rel:.0f}<small>点</small></div>"
+            f"<div class='bar'><i style='width:{max(rel, 3):.0f}%'></i></div>"
+            f"<div class='ratio'>見込み {p*100:.1f}%・平常の×{ratio:.2f}</div></td><td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
             f"<td class='prevc'>{prev}</td><td class='sparkc'>{sp}</td></tr>")
-    colname = "プラス見込み" if cfg.goal == "plus" else "高設定期待度"
-    table = (f"<table class='rk'><tr class='hd'><th>順位</th><th>台番</th><th>{colname}</th><th>主な根拠</th><th>前回データ</th>"
+    colname = "今日の中での評価"
+    spread = (float(pred["score"].max()) - float(pred["score"].min())) * 100 if len(pred) else 0
+    word = "プラス終了の見込み" if cfg.goal == "plus" else "高設定の見込み"
+    rank_note = (f"<p class='note'>点数は、今日の{len(pred)}台の中での位置（一番上＝100点・一番下＝0点）です。"
+                 f"実際の{word}は1位と最下位で{spread:.1f}ポイントしか違いません"
+                 f"（{float(pred['score'].min())*100:.1f}%〜{float(pred['score'].max())*100:.1f}%）。"
+                 "過去データで差が小さいと出ているためで、無理に差を広げると検証の成績が悪くなりました。"
+                 "順位の参考としてご覧ください。</p>")
+    table = rank_note + (f"<table class='rk'><tr class='hd'><th>順位</th><th>台番</th><th>{colname}</th><th>主な根拠</th><th>前回データ</th>"
              "<th>直近の判定設定</th></tr>" + "".join(trs) + "</table>")
     judgesec = judge_grid(hist, pred["unit"].astype(int).tolist(), cfg)
     daysec = day_section(hist, target, cfg)
@@ -361,6 +383,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     # 島マップ
     units_sorted = sorted(pred["unit"].astype(int).tolist())
     sc = dict(zip(pred["unit"].astype(int), pred["score"]))
+    rk = dict(zip(pred["unit"].astype(int), pred["rank"].astype(int)))
     runs: list[list[int]] = []
     if cfg.islands:
         runs = [[u for u in units_sorted if a <= u <= b] for a, b in cfg.islands]
@@ -374,9 +397,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         if cur:
             runs.append(cur)
     isl = "".join("<div class='island'>" + "".join(
-        f"<div class='cell' style='background:{heat_class(sc[u], base)}'>{u}<small>{sc[u]*100:.0f}%</small></div>"
+        f"<div class='cell' style='background:{grade_of(rk[u], len(pred))[1]}'>{u}<small>{grade_of(rk[u], len(pred))[0]}</small></div>"
         for u in run) + "</div>" for run in runs if run)
-    mapsec = f"<h2>島マップ</h2><div class='map'>{isl}</div><p class='note'>色が濃いほど{colname}が高い台。</p>"
+    mapsec = f"<h2>島マップ</h2><div class='map'>{isl}</div><p class='note'>色が濃いほど今日の中で評価が高い台（◎上位10%・○上位30%・△中位・×下位30%）。</p>"
 
     # 店の癖
     s = model.summaries
