@@ -1,0 +1,111 @@
+name: ハナハナ予想（豊川）
+
+on:
+  schedule:
+    - cron: '46 22 * * *'    # 毎朝 7:46（日本時間）: 今日の予想ページを作成
+    - cron: '23 17 * * *'    # 毎晩 2:23（日本時間）: みんレポから過去分を少しずつ取得（取り終えたら何もしない）
+    - cron: '37 * * * *'     # 1時間ごと: 取りに行くページの一覧を入れ替え（届かない日付を後ろへ）＋取りこぼしの処理
+  issue_comment:
+    types: [created]                         # iPhoneからデータが届いたとき
+  push:
+    branches: [main]
+    paths: ['inbox/**', 'hana/**', 'config.yaml', 'requirements.txt', '.github/workflows/**']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'inbox=受信データを処理して予想 / daily=朝の処理 / history=みんレポ過去分 / diag=接続診断'
+        type: choice
+        options: [inbox, daily, history, diag]
+        default: inbox
+
+permissions:
+  contents: write
+  issues: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: hana-toyokawa
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # コメントで起動したときは、持ち主のコメントだけ処理する
+    if: github.event_name != 'issue_comment' || github.event.comment.user.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Tokyo
+      PYTHONUTF8: '1'
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main          # 起動時点ではなく最新のデータから始める（続けて届いたときの取りこぼし防止）
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 準備
+        run: pip install -r requirements.txt
+
+      - name: 受信データの処理と予想
+        run: |
+          MODE="${{ inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            case "${{ github.event.schedule }}" in
+              "46 22 * * *") MODE=daily ;;
+              "23 17 * * *") MODE=history ;;
+              *) MODE=inbox ;;
+            esac
+          fi
+          echo "実行モード: $MODE"
+          if [ "$MODE" = "diag" ]; then
+            pip install playwright && python -m playwright install --with-deps chromium
+            python -m hana diag || true
+            MODE=inbox
+          fi
+          if [ "$MODE" = "history" ]; then
+            python -m hana minrepo-history || true
+            MODE=inbox
+          fi
+          python -m hana $MODE
+          python -m hana status
+
+      - name: データを保存
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data inbox 2>/dev/null || git add -A data
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -q -m "データ更新 $(date '+%Y-%m-%d %H:%M')"
+          for i in 1 2 3 4; do
+            git pull -q --rebase && git push -q && break
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+
+      - name: ログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log
+          path: logs/
+          retention-days: 7
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+  deploy:
+    needs: run
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

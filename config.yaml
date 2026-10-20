@@ -1,0 +1,41 @@
+# ハナハナ予想システム（ベガビック1130豊川店）クラウド版 設定ファイル
+# iPhoneのGitHubアプリやSafariからこのファイルを編集すると、次回の実行から反映されます。
+
+storage: csv               # データをCSVでリポジトリに保存（クラウド実行用。変更しないでください）
+
+hall:
+  name: ベガビック1130豊川店
+  # アナスロ・みんレポでは旧店名「ベガス豊川店」のページで公開されています
+  anaslo_list_url: https://ana-slo.com/ホールデータ/愛知県/ベガス豊川店-データ一覧/
+  anaslo_day_url: https://ana-slo.com/{date}-%e3%83%99%e3%82%ac%e3%82%b9%e8%b1%8a%e5%b7%9d%e5%ba%97-data/
+  minrepo_tag_url: https://min-repo.com/tag/%E3%83%99%E3%82%AC%E3%82%B9%E8%B1%8A%E5%B7%9D%E5%BA%97/
+  event_digits: [5]        # 旧イベント日（日付の末尾）。5のつく日
+
+target:
+  keyword: ハナハナ         # 機種名にこの文字を含む台が対象
+  high_min: 5               # 「高設定」とみなす設定（5なら設定5・6）
+  judge_min_games: 2000     # これ未満のG数の日は設定を判定しない
+  # 島の区切り（角台の判定用）。台番が分かったら入れてください。例: islands: [[101, 110], [111, 120]]
+  islands: []
+
+history:
+  minrepo_minutes: 20       # みんレポから過去分を取る時間（毎晩。取り終わると何もしません）
+  since: 2025-01-01         # この日以降の過去分を取る
+
+phone:
+  pages_manual: 3          # 手動の「ハナハナまとめて」で1回に取りに行くページ数
+  pages_per_run: 1          # iPhoneが1回に取りに行くページ数（自動実行では2ページ目で止まりやすいので1）
+
+fetch:
+  anaslo_direct: false      # クラウドから直接アナスロへ取りに行くか（GitHubからは拒否されるので false）
+  interval_sec: 75          # アナスロ 1ページごとの待ち時間（秒）
+  jitter_sec: 30
+  backoff_min: 20           # アクセス制限(403)が出たときに休む時間（分）
+  daily_max_pages: 8
+  minrepo_interval_sec: 8
+  engine: auto              # auto / requests / playwright
+
+predict:
+  top_n: 10
+  prev_max_gap: 1
+  open_browser: false
