@@ -11,29 +11,29 @@
  "unit_factors": [
   "f_seq2"
  ],
- "score": 0.0077,
- "base_score": 0.0007,
+ "score": 0.0076,
+ "base_score": 0.0006,
  "steps": [
   {
    "add": "f_seq2",
    "label": "2日前→前日の判定の流れ",
-   "gain": 0.0071
+   "gain": 0.007
   }
  ],
  "single": {
-  "f_seq2": 0.0071,
-  "f_seq3": -0.002,
+  "f_seq2": 0.007,
+  "f_seq3": -0.0005,
   "f_unit": -0.0026,
-  "f_udigit": -0.0013,
-  "f_match": 0.0012,
-  "f_corner": -0.0014,
-  "f_prevdiff": -0.0062,
-  "f_prevhigh": 0.0041,
-  "f_streak": 0.0014,
-  "f_recent": -0.0028
+  "f_udigit": -0.0029,
+  "f_match": 0.0015,
+  "f_corner": -0.0008,
+  "f_prevdiff": -0.0041,
+  "f_prevhigh": 0.0012,
+  "f_streak": -0.0035,
+  "f_recent": -0.0044
  },
  "test_days": 90,
- "n_days": 155,
+ "n_days": 202,
  "top_k": 5,
  "when": "2026-10-21"
 }
