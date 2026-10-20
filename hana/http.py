@@ -22,6 +22,10 @@ DEFAULT_UA = (
 )
 
 
+import re as _re
+_GATE = _re.compile(r"fetch\('([^']+admin-ajax\.php)'[\s\S]*?body:\s*'([^']+)'")
+
+
 class RateLimited(Exception):
     """サイト側から一時的に拒否された（403/429）。"""
 
@@ -74,7 +78,25 @@ class Fetcher:
             raise RateLimited(f"{r.status_code} {url}")
         r.raise_for_status()
         r.encoding = r.apparent_encoding if not r.encoding or r.encoding.lower() == "iso-8859-1" else r.encoding
-        return r.text
+        text = r.text
+        gate = _GATE.search(text) if len(text) < 3000 else None
+        if gate:
+            # みんレポの簡易チェック: 指定のURLへPOSTしてクッキーをもらい、同じページを開き直す
+            ajax, body = gate.group(1), gate.group(2)
+            time.sleep(1.5)
+            self.session.post(ajax, data=body, timeout=self.timeout,
+                              headers={"Content-Type": "application/x-www-form-urlencoded",
+                                       "Referer": url, "Origin": "https://min-repo.com",
+                                       "X-Requested-With": "XMLHttpRequest"})
+            time.sleep(1.5)
+            r = self.session.get(url, headers={"Referer": url}, timeout=self.timeout)
+            self._last = time.time()
+            if r.status_code in (403, 429):
+                raise RateLimited(f"{r.status_code} {url}")
+            r.raise_for_status()
+            r.encoding = r.apparent_encoding if not r.encoding or r.encoding.lower() == "iso-8859-1" else r.encoding
+            text = r.text
+        return text
 
     # ---- Playwright（requestsで弾かれる環境向けの予備手段） ----
     def _get_playwright(self, url: str, referer: str | None) -> str:

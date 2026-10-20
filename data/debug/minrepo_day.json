@@ -1,9 +1,0 @@
-{
- "url": "https://min-repo.com/3418455/",
- "len": 408,
- "title": "",
- "kishu_links": [],
- "table_heads": [],
- "text": "",
- "raw": "<script type=\"text/javascript\">\n\t(async function() {\n\t\ttry {\n\t\t\tconst response = await fetch('https://min-repo.com/wp-admin/admin-ajax.php', {\n\t\t\t\tmethod: 'POST',\n\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded' },\n\t\t\t\tbody: 'action=w_scd_n&_ajax_nonce=725eb36e67'\n\t\t\t});\n\n\t\t\tif (response.ok) {\n\t\t\t\twindow.location.href = window.location.href;\n\t\t\t}\n\t\t} catch (error) {\n\t\t}\n\t})();\n</script>\n"
-}
