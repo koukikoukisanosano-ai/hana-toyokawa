@@ -19,6 +19,7 @@ import webbrowser
 from datetime import date as Date, datetime, timedelta, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import backtest as BT
@@ -316,6 +317,35 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
     return res
 
 
+def load_methods(root: Path) -> dict:
+    try:
+        return json.loads((root / "data" / "methods.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def cmd_compare(cfg, db, root: Path, force: bool = False) -> dict | None:
+    """予想方法の比較（週1回・データが2割増えたとき・狙いを変えたとき）。一番よい方法を data/methods.json に残す。"""
+    from . import ml
+    units, hall = db.units(cfg["target"].get("keyword", "ハナハナ")), db.hall_days()
+    n_days = units["date"].nunique() if len(units) else 0
+    s = C.model_settings(cfg)
+    old = load_methods(root)
+    if not force and old.get("ok") and old.get("goal") == s.goal:
+        when = Date.fromisoformat(old.get("when", "2000-01-01"))
+        if (today_jst() - when).days < 7 and n_days < int(old.get("n_days", 0) * 1.2) + 1:
+            return None
+    if s.goal != "rank":
+        return None
+    res = ml.compare(units, hall, s)
+    res["when"] = str(today_jst())
+    res["goal"] = s.goal
+    (root / "data" / "methods.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    if res.get("ok"):
+        log.info("予想方法を比較: 一番よいのは %s", ml.LABEL.get(res["best"], res["best"]))
+    return res
+
+
 def run_checks(cfg, db, root: Path) -> None:
     """休業日の候補の記録、要因の選び直し（週1回・データが2割増えたとき）、予想の検証（週1回）。"""
     try:
@@ -326,6 +356,10 @@ def run_checks(cfg, db, root: Path) -> None:
         cmd_select(cfg, db, root)
     except Exception as e:
         log.warning("要因の選び直しでエラー（前回の選択のまま続行）: %s", e)
+    try:
+        cmd_compare(cfg, db, root)
+    except Exception as e:
+        log.warning("予想方法の比較でエラー（前回の結果のまま続行）: %s", e)
     if need_backtest(root):
         try:
             cmd_backtest(cfg, db, root)
@@ -390,6 +424,23 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     s = C.model_settings(cfg)
     m = M.train(units, hall, s)
     pred = M.predict(m, target)
+    meth = load_methods(root)
+    best = meth.get("best") if meth.get("ok") and meth.get("goal") == s.goal else None
+    if best and best not in ("factor", "benchmark_zero"):
+        try:   # 比較で一番よかった方法の点数で並べ直す
+            from . import ml
+            ms = ml.predict(units, s, best, target)
+            if ms is not None:
+                why = ml.explain(units, s, target)
+                pred = pred.merge(ms, on="unit", how="left")
+                r = pred["ml_score"].rank(method="average")
+                pred["score"] = ((r - 0.5) / r.notna().sum()).fillna(0.5)
+                pred["why"] = pred["unit"].map(lambda u: why.get(int(u), []))
+                pred = pred.sort_values("score", ascending=False).reset_index(drop=True)
+                pred["rank"] = np.arange(1, len(pred) + 1)
+                pred.attrs["method"] = best
+        except Exception as e:
+            log.warning("予想方法 %s での予想に失敗（これまでの方法で表示）: %s", best, e)
     pred_dir = root / "data" / "predictions"
     try:   # 台ごと・日ごとの判定設定を記録
         j = m.hist[["date", "unit", "model", "games", "bb", "rb", "diff", "gassan", "reg_den", "judge", "p_high"]].copy()
@@ -592,6 +643,7 @@ def main(argv=None) -> int:
     sub.add_parser("status")
     sub.add_parser("select")
     sub.add_parser("page")
+    sub.add_parser("compare")
     sub.add_parser("import-seed")
     sub.add_parser("diag")
     sub.add_parser("inbox")
@@ -670,6 +722,9 @@ def main(argv=None) -> int:
         n = mr.backfill_history(today_jst(), before=first, since=since, coef=coef,
                                 deadline=time.time() + hours * 3600)
         log.info("みんレポ過去分 %d 台日を保存", n)
+    elif a.cmd == "compare":
+        r = cmd_compare(cfg, db, root, force=True)
+        log.info("比較結果: %s", json.dumps((r or {}).get("summary", {}), ensure_ascii=False)[:2000])
     elif a.cmd == "page":
         # 取得はせず、いまのデータと最新のプログラムでページだけ作り直す（設定やプログラムを変えたとき用）
         run_checks(cfg, db, root)

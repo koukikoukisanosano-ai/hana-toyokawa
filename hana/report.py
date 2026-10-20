@@ -351,8 +351,11 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         u = int(r["unit"])
         p = float(r["score"])
         ratio = p / base if base > 0 else 1
-        chips = "".join(f"<span class='chip {'p' if v > 0 else 'm'}' title='{E(d)}'>{'＋' if v > 0 else '－'}{E(t)}</span>"
-                        for t, v, d in M.reasons(r, model))
+        if isinstance(r.get("why"), list):
+            chips = "".join(f"<span class='chip'>{E(t)}</span>" for t in r["why"])
+        else:
+            chips = "".join(f"<span class='chip {'p' if v > 0 else 'm'}' title='{E(d)}'>{'＋' if v > 0 else '－'}{E(t)}</span>"
+                            for t, v, d in M.reasons(r, model))
         lr = last_by_unit.loc[u] if u in last_by_unit.index else None
         prev = "-"
         if lr is not None:
@@ -374,7 +377,20 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<td class='prevc'>{prev}</td><td class='sparkc'>{sp}</td></tr>")
     colname = "今日の中での評価"
     spread = (float(pred["score"].max()) - float(pred["score"].min())) * 100 if len(pred) else 0
-    if cfg.goal == "rank":
+    meth = {}
+    try:
+        import json as _json
+        meth = _json.loads((Path(pred_dir).parent / "methods.json").read_text(encoding="utf-8")) if pred_dir else {}
+    except Exception:
+        meth = {}
+    if cfg.goal == "rank" and pred.attrs.get("method") and meth.get("ok"):
+        v = meth["summary"].get(pred.attrs["method"], {})
+        rank_note = (f"<p class='note'>全{len(pred)}台を、今日の差枚が多くなりそうな順に並べています（点数は1位＝100点・最下位＝0点）。"
+                     f"予想方法は、{len(meth['summary'])}通りの方法を過去{meth['test_days']}日で比べて一番成績がよかった"
+                     f"「{E(v.get('label', ''))}」です（予想の順位と実際の差枚順位の一致度 {v.get('rho', 0):+.3f}・"
+                     f"予想上位5台の平均差枚 {v.get('top5_diff', 0):+,.0f}枚／全台平均 {v.get('all_diff', 0):+,.0f}枚）。"
+                     "下の「予想方法の比較」に全部の成績があります。</p>")
+    elif cfg.goal == "rank":
         rho = (bt or {}).get("rho")
         rank_note = (f"<p class='note'>全{len(pred)}台を、今日の差枚が多くなりそうな順に並べています（点数は1位＝100点・最下位＝0点）。"
                      + (f"過去{bt['days']}日で検証した、予想の順位と実際の差枚順位の一致度は {rho:+.3f}"
@@ -447,8 +463,24 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
                  f"。全体平均は {base*100:.1f}%。日数が少ない条件は偶然の可能性があります。</p>"
                  f"<div class='grid2'>{''.join(p for p in parts if p)}</div>")
 
+    # 予想方法の比較
+    msec = ""
+    if meth.get("ok"):
+        rows_m = "".join(
+            f"<tr{' style=\'font-weight:700\'' if k == meth['best'] else ''}><td>{E(v['label'])}{' ★採用' if k == meth['best'] else ''}</td>"
+            f"<td class='num'>{v['rho']:+.3f}</td><td class='num'>{v['rho_first']:+.3f}／{v['rho_second']:+.3f}</td>"
+            f"<td class='num'>{v['top5_diff']:+,.0f}</td><td class='num'>{v['top5_plus']*100:.0f}%</td></tr>"
+            for k, v in sorted(meth["summary"].items(), key=lambda kv: -kv[1]["rho"]))
+        anyv = next(iter(meth["summary"].values()))
+        msec = (f"<h2>予想方法の比較</h2><p class='note'>過去{meth['test_days']}日の各日を、その日より前のデータだけで予想し直して採点"
+                f"（{meth.get('when', '')}時点・週1回とデータが2割増えるたびにやり直し）。一致度＝全台の予想順位と実際の差枚順位の順位相関"
+                f"（1＝完全一致・0＝無関係）。前半と後半の両方でプラスだった方法の中から、一番高いものを採用します。"
+                f"全台平均は 差枚{anyv['all_diff']:+,.0f}枚・プラス率{anyv['all_plus']*100:.0f}%。</p>"
+                f"<div class='scroll'><table class='mini'><tr><th>方法</th><th>一致度</th><th>前半／後半</th><th>上位5台の平均差枚</th>"
+                f"<th>上位5台のプラス率</th></tr>{rows_m}</table></div>")
+
     # 検証
-    btsec = "<h2>過去データでの検証</h2>"
+    btsec = msec + "<h2>過去データでの検証</h2>"
     if bt and bt.get("ok"):
         btsec += (f"<div class='status'>"
                   + (f"<div class='box'><b>{bt['rho']:+.3f}</b><span>全台の予想順位と実際の差枚順位の一致度（順位相関・1が完全一致）"
