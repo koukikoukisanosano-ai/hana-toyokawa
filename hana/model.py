@@ -40,6 +40,7 @@ ALL_FACTORS = {
     "f_prevhigh": ("前日の高設定挙動（据え置き）", 40.0),
     "f_streak":   ("連続凹み日数", 40.0),
     "f_recent":   ("直近7日の判定設定", 40.0),
+    "f_busy":     ("よく回される台か（直近30日の平均G数）", 40.0),
 }
 ALL_HALL_FACTORS = {"h_digit": "店全体の日付末尾の強さ", "h_wday": "店全体の曜日の強さ"}
 # 日付・曜日などの「日」の要因は、その日の全台に同じだけ効く（台の順位は変えず、店全体の期待台数だけを動かす）ので常に使う。
@@ -75,7 +76,8 @@ use_factors(DEFAULT_ACTIVE)
 class Settings:
     keyword: str = "ハナハナ"
     high_min: int = 5
-    label_min_games: int = 1500
+    label_min_games: int = 1000   # 学習・検証に使うG数の下限
+    goal: str = "plus"             # 予想の狙い: plus=差枚プラスで終わる台 / high=高設定(high_min以上)の台
     event_digits: tuple[int, ...] = (0, 5)
     prev_max_gap: int = 1          # 「前回」として使うのは何日前まで（1=前日のみ）
     islands: list[list[int]] | None = None   # [[開始, 終了], ...] 未指定なら連番の塊を島とみなす
@@ -112,14 +114,25 @@ def prepare(units: pd.DataFrame, cfg: Settings) -> tuple[pd.DataFrame, np.ndarra
     df = units[units["model"].str.contains(cfg.keyword, na=False)].copy()
     df = df.dropna(subset=["games", "bb", "rb"])
     df["date"] = pd.to_datetime(df["date"])
+    # みんレポの差枚は伏せられている（±1）ので、読み込むたびに最新の計算式で出し直す
+    if "source" in df.columns:
+        from .sources.minrepo import est_diff
+        m = df["source"].isin(["minrepo", "minrepo_est"])
+        if m.any():
+            df.loc[m, "diff"] = [est_diff(b, r, g, md) for b, r, g, md in
+                                 zip(df.loc[m, "bb"], df.loc[m, "rb"], df.loc[m, "games"], df.loc[m, "model"])]
     df, prior = add_estimates(df, high_min=cfg.high_min, min_games=300, judge_min_games=cfg.judge_min_games)
-    # 答え = その日の合算で「設定{high_min}以上」と判定されたか（サイトの判定設定表と同じ物差し）。
-    # 判定できない日（G数不足）は学習に使わない。
-    judged = df["judge"].notna().to_numpy()
-    info = np.where(judged, 1.0, 0.0)
+    # 答え（goal=plus）: その日 差枚プラスで終わったか。goal=high: 合算で「設定{high_min}以上」と判定されたか。
+    # G数が label_min_games 未満の日は学習に使わない。
+    if cfg.goal == "plus":
+        ok = (df["games"] >= cfg.label_min_games) & df["diff"].notna()
+        df["y"] = (df["diff"] > 0).astype(float).where(ok, 0.0)
+    else:
+        ok = df["judge"].notna() & (df["games"] >= cfg.label_min_games)
+        df["y"] = (df["judge"] >= cfg.high_min).astype(float).where(ok, 0.0)
+    info = np.where(ok.to_numpy(), 1.0, 0.0)
     info = np.where(df.get("est", 0) == 1, info * 0.5, info)
     df["w"] = info
-    df["y"] = (df["judge"] >= cfg.high_min).astype(float).where(judged, 0.0)
     return df.sort_values(["date", "unit"]).reset_index(drop=True), prior
 
 
@@ -193,6 +206,7 @@ def add_prev(df: pd.DataFrame, cfg: Settings) -> pd.DataFrame:
             streak[i] = streak[i - 1] + 1 if lows[i - 1] else 0
     df["streak"] = streak
     df["recent_judge"], df["recent_n"] = recent_judge(df, df["unit"].to_numpy(), df["date"].to_numpy())
+    df["recent_games"] = recent_games(df, df["unit"].to_numpy(), df["date"].to_numpy())
     st = judge_state(df["judge"])
     for k in (1, 2, 3):
         okk = pd.Series(open_gap(g["date"].shift(k), df["date"], cfg), index=df.index) == k
@@ -231,6 +245,31 @@ def recent_judge(hist: pd.DataFrame, units, dates, days: int = 7):
     return mean, n
 
 
+def recent_games(hist: pd.DataFrame, units, dates, days: int = 30) -> np.ndarray:
+    """各(台, 日)について、その日より前の days 日間の平均G数。"""
+    by = {u: (g["date"].to_numpy(), g["games"].to_numpy(float)) for u, g in hist.groupby("unit")}
+    out = np.full(len(units), np.nan)
+    span = np.timedelta64(days, "D")
+    for i, (u, d) in enumerate(zip(units, dates)):
+        if u not in by:
+            continue
+        dd, gg = by[u]
+        d = np.datetime64(d)
+        m = (dd < d) & (dd >= d - span)
+        if m.sum() >= 5:
+            out[i] = gg[m].mean()
+    return out
+
+
+def busy_bucket(g) -> str:
+    if pd.isna(g):
+        return "なし"
+    for lim, name in ((3500, "〜3500G"), (4500, "3500〜4500G"), (5500, "4500〜5500G"), (6500, "5500〜6500G")):
+        if g < lim:
+            return name
+    return "6500G〜"
+
+
 def recent_bucket(mean, n) -> str:
     if n < 3 or pd.isna(mean):
         return "なし"
@@ -256,6 +295,7 @@ def add_keys(df: pd.DataFrame, cfg: Settings, pos: dict[int, str]) -> pd.DataFra
                          np.where(df["prev_p"] >= 0.30, "高設定挙動", "通常"))
     df["k_streak"] = np.where(df["streak"] >= 3, "3日以上", df["streak"].astype(int).astype(str) + "日")
     df["k_recent"] = [recent_bucket(m, n) for m, n in zip(df["recent_judge"], df["recent_n"])]
+    df["k_busy"] = [busy_bucket(g) for g in df["recent_games"]] if "recent_games" in df else "なし"
     df["k_seq2"] = [seq_key(a, b) for a, b in zip(df["st2"], df["st1"])]
     df["k_seq3"] = [seq_key(a, b, c) for a, b, c in zip(df["st3"], df["st2"], df["st1"])]
     return df
@@ -456,6 +496,7 @@ def candidates(model: Model, target: Date) -> pd.DataFrame:
     for k in (1, 2, 3):
         dk = prev_open_day(t, k + off, model.cfg)
         cur[f"st{k}"] = [judge_state([jd.get((u, dk), np.nan)])[0] for u in cur["unit"]]
+    cur["recent_games"] = recent_games(df, cur["unit"].to_numpy(), np.full(len(cur), np.datetime64(t)))
     cur["recent_judge"], cur["recent_n"] = recent_judge(df, cur["unit"].to_numpy(),
                                                         np.full(len(cur), np.datetime64(t)))
     cur = add_keys(cur.reset_index(drop=True), model.cfg, pos)
@@ -507,6 +548,7 @@ def summarize_habits(df: pd.DataFrame, hall: pd.DataFrame) -> dict:
     out["prevhigh"] = table("k_prevhigh", lambda v: f"前日{v}")
     out["streak"] = table("k_streak", lambda v: f"凹み{v}")
     out["recent"] = table("k_recent", lambda v: f"直近7日の判定が{v}")
+    out["busy"] = table("k_busy", lambda v: f"直近30日の平均 {v}")
     out["seq2"] = table("k_seq2", lambda v: f"判定の流れ {v}")
     out["seq3"] = table("k_seq3", lambda v: f"判定の流れ {v}")
     out["unit"] = table("k_unit", lambda v: f"{v}番")
@@ -527,7 +569,7 @@ _REASON_KEYS = {
     "f_unit": ("unit", "k_unit"), "f_udigit": ("udigit", "k_udigit"), "f_match": ("match", "k_match"),
     "f_corner": ("corner", "k_corner"), "f_prevdiff": ("prevdiff", "k_prevdiff"),
     "f_prevhigh": ("prevhigh", "k_prevhigh"), "f_streak": ("streak", "k_streak"),
-    "f_recent": ("recent", "k_recent"),
+    "f_recent": ("recent", "k_recent"), "f_busy": ("busy", "k_busy"),
     "f_seq2": ("seq2", "k_seq2"), "f_seq3": ("seq3", "k_seq3"),
 }
 
@@ -557,7 +599,8 @@ def reasons(row: pd.Series, model: Model, top: int = 4, min_effect: float = 0.06
             if c == "f_prevdiff" and pd.notna(row.get("prev_diff")):
                 label += f"({int(row['prev_diff']):+,}枚)"
             text = f"{label} ×{h['ratio']:.2f}"
-            detail = f"{h['label']}: 高設定率 {h['rate']*100:.1f}%（平常 {s['base']*100:.1f}%）・{int(h['days'])}日分"
+            word = "プラス終了率" if model.cfg.goal == "plus" else "高設定率"
+            detail = f"{h['label']}: {word} {h['rate']*100:.1f}%（平常 {s['base']*100:.1f}%）・{int(h['days'])}日分"
         elif c in ("h_digit", "h_wday"):
             tab = s.get("hall_digit" if c == "h_digit" else "hall_wday")
             k = int(row["k_digit"] if c == "h_digit" else row["k_wday"])

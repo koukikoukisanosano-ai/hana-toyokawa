@@ -78,6 +78,13 @@ table.rk td.sparkc{display:none}
 """
 
 
+GOAL_WORD = {"plus": "プラス終了", "high": "高設定っぽい"}
+
+
+def goal_title(cfg) -> str:
+    return "プラス終了の見込み" if cfg.goal == "plus" else f"高設定(設定{cfg.high_min}以上)期待度"
+
+
 def factor_note(model) -> str:
     """どの要因で順位を決めているか（この店のデータで選んだものか、初期値か）。"""
     used = [M.factor_label(c) for c in model.cols if c not in M.DAY_FACTORS]
@@ -130,7 +137,7 @@ def habit_table(t: pd.DataFrame, base: float, title: str, extra: pd.DataFrame | 
         rows.append(f"<tr><td>{E(str(r['label']))}</td><td class='num'{cls}>{r['rate']*100:.1f}%</td>"
                     f"<td class='num'>×{ratio:.2f}</td><td class='num'>{fmt_int(r['avg_diff'], True)}</td>"
                     f"<td class='num'>{int(r['days'])}日</td></tr>")
-    return (f"<div><h3 style='font-size:15px;margin:6px 0'>{E(title)}</h3><table class='mini'><tr><th>条件</th><th>高設定率</th>"
+    return (f"<div><h3 style='font-size:15px;margin:6px 0'>{E(title)}</h3><table class='mini'><tr><th>条件</th><th>率</th>"
             f"<th>平常比</th><th>平均差枚</th><th>日数</th></tr>{''.join(rows)}</table></div>")
 
 
@@ -170,10 +177,11 @@ def check_section(hist: pd.DataFrame, pred_dir: Path | None, target: Date, top_k
     win = sum(r["top_diff"] > r["all_diff"] for r in rows)
     avg_top = np.mean([r["top_diff"] for r in rows])
     avg_all = np.mean([r["all_diff"] for r in rows])
-    hits = sum(r["hit"] for r in rows)
+    plus = sum(int((r["act"]["diff"] > 0).sum()) for r in rows)
+    npick = sum(len(r["act"]) for r in rows)
     summary = (f"<div class='status'><div class='box'><b>{win}/{n}日</b><span>予想上位{top_k}台が全台平均を上回った日</span></div>"
                f"<div class='box'><b>{avg_top:+,.0f}枚</b><span>予想上位{top_k}台の平均差枚（全台平均 {avg_all:+,.0f}枚）</span></div>"
-               f"<div class='box'><b>{hits}/{n * top_k}台</b><span>その日の推定設定上位{top_k}台に入った台数</span></div></div>")
+               f"<div class='box'><b>{plus}/{npick}台</b><span>予想上位{top_k}台のうちプラスで終わった台</span></div></div>")
     trs = []
     for r in rows[:show]:
         cells = " ".join(
@@ -189,7 +197,7 @@ def check_section(hist: pd.DataFrame, pred_dir: Path | None, target: Date, top_k
 def day_section(hist, target, cfg) -> str:
     from . import daystrength as DS
     try:
-        r = DS.estimate(hist, target, cfg.event_digits, cfg.high_min)
+        r = DS.estimate(hist, target, cfg.event_digits, cfg.high_min, goal=cfg.goal)
     except Exception:
         return ""
     if not r:
@@ -197,17 +205,17 @@ def day_section(hist, target, cfg) -> str:
     t = r["today"]
     lv, cls = DS.level(t["ratio"])
     wd = DS.WEEKDAY[target.weekday()]
-    gname = "0・5のつく日（旧イベ日）" if t["group"] == "旧イベ日" else "0・5のつかない日"
-    sub = (f"{gname}の過去{t['g_days']}日：全台平均 {t['g_diff']:+,.0f}枚・プラス台 {t['g_plus']*100:.0f}%・"
-           f"高設定っぽい台 {t['g_rate']*100:.0f}%（全日平均 {r['base']*100:.0f}%）")
+    digs = "・".join(str(d) for d in cfg.event_digits)
+    gname = f"{digs}のつく日（旧イベ日）" if t["group"] == "旧イベ日" else f"{digs}のつかない日"
+    sub = (f"{gname}の過去{t['g_days']}日：全台平均 {t['g_diff']:+,.0f}枚・プラス台 {t['g_plus']*100:.0f}%"
+           f"（全日平均 {r['base']*100:.0f}%）")
     week = "".join(
         f"<div class='{DS.level(a['ratio'])[1]}'>{a['date'].month}/{a['date'].day}<br>{DS.WEEKDAY[a['date'].weekday()]}<br>"
         f"<b>{DS.level(a['ratio'])[0]}</b></div>" for a in r["ahead"])
     return (f"<h2>今日の店の強さ</h2><div class='dstr {cls}'><b class='lv'>{lv}</b>"
-            f"高設定っぽい台の見込み {t['rate']*100:.0f}%（平常の×{t['ratio']:.2f}）・{wd}曜"
+            f"{GOAL_WORD[cfg.goal]}の台の見込み {t['rate']*100:.0f}%（平常の×{t['ratio']:.2f}）・{wd}曜"
             f"<div class='sub'>{E(sub)}</div><div class='week'>{week}</div>"
-            f"<div class='sub'>この店のハナハナは、台ごとの差より「日」による差がはっきり出ています。"
-            f"その日より前のデータだけで見積もった強さと実際の強さを{r['n_days']}日分で比べて確認済み。</div></div>")
+            f"<div class='sub'>旧イベ日かどうかと曜日ごとの、過去{r['n_days']}日分の集計からの見積もりです。</div></div>")
 
 
 def judge_txt(r) -> str:
@@ -285,11 +293,11 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     avg_high = base * n_units
 
     tags = "".join(f"<span class='tag'>{E(t)}</span>" for t in info["tags"])
-    head = (f"<header><h1>{E(hall_name)} ハナハナ予想<small>高設定(設定{cfg.high_min}以上)期待度</small></h1>"
+    head = (f"<header><h1>{E(hall_name)} ハナハナ予想<small>{goal_title(cfg)}</small></h1>"
             f"<div class='date'>{target.year}年{target.month}月{target.day}日({info['wday']}){tags}</div></header>")
 
     boxes = [
-        (f"{exp_high:.1f}台", f"今日の高設定 期待台数（全{n_units}台・平常{avg_high:.1f}台）"),
+        (f"{exp_high:.1f}台", (f"今日のプラス終了 見込み台数（全{n_units}台・平常{avg_high:.1f}台）" if cfg.goal == "plus" else f"今日の高設定 期待台数（全{n_units}台・平常{avg_high:.1f}台）")),
         (f"{last_date:%m/%d}" if last_date else "-", f"データの最新日（{lag}営業日前）" if lag is not None else "データなし"),
         (f"{model.n_days}日分", "学習に使ったデータ"),
         ("調整済" if model.tuned else "蓄積中", "要因の重み（45日分以上で自動調整）"),
@@ -344,7 +352,8 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<td class='score'><div class='pct'>{p*100:.1f}%</div><div class='bar'><i style='width:{width:.0f}%'></i></div>"
             f"<div class='ratio'>平常の×{ratio:.2f}</div></td><td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
             f"<td class='prevc'>{prev}</td><td class='sparkc'>{sp}</td></tr>")
-    table = ("<table class='rk'><tr class='hd'><th>順位</th><th>台番</th><th>高設定期待度</th><th>主な根拠</th><th>前回データ</th>"
+    colname = "プラス見込み" if cfg.goal == "plus" else "高設定期待度"
+    table = (f"<table class='rk'><tr class='hd'><th>順位</th><th>台番</th><th>{colname}</th><th>主な根拠</th><th>前回データ</th>"
              "<th>直近の判定設定</th></tr>" + "".join(trs) + "</table>")
     judgesec = judge_grid(hist, pred["unit"].astype(int).tolist(), cfg)
     daysec = day_section(hist, target, cfg)
@@ -367,7 +376,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     isl = "".join("<div class='island'>" + "".join(
         f"<div class='cell' style='background:{heat_class(sc[u], base)}'>{u}<small>{sc[u]*100:.0f}%</small></div>"
         for u in run) + "</div>" for run in runs if run)
-    mapsec = f"<h2>島マップ</h2><div class='map'>{isl}</div><p class='note'>色が濃いほど高設定期待度が高い台。</p>"
+    mapsec = f"<h2>島マップ</h2><div class='map'>{isl}</div><p class='note'>色が濃いほど{colname}が高い台。</p>"
 
     # 店の癖
     s = model.summaries
@@ -394,16 +403,22 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             parts.append(f"<div><h3 style='font-size:15px;margin:6px 0'>店全体（全機種）の平均差枚・日付末尾別</h3>"
                          f"<table class='mini'><tr><th>日付</th><th>平均差枚/台</th><th>日数</th></tr>{rows}</table>"
                          f"<p class='note'>{span[0]}〜{span[1]}（{span[2]}日）</p></div>")
-        habit = (f"<h2>学習した店の癖</h2><p class='note'>高設定率 = その日の合算で「設定{cfg.high_min}以上」と判定された台の割合"
-                 f"（ゲーム数が少ない日は重みを下げて集計）。全体平均は {base*100:.1f}%。日数が少ない条件は偶然の可能性があります。</p>"
+        rate_def = (f"率 = {cfg.label_min_games:,}G以上回った台のうち、差枚プラスで終わった台の割合"
+                    if cfg.goal == "plus" else
+                    f"率 = その日の合算で「設定{cfg.high_min}以上」と判定された台の割合")
+        habit = (f"<h2>学習した店の癖</h2><p class='note'>{rate_def}"
+                 f"。全体平均は {base*100:.1f}%。日数が少ない条件は偶然の可能性があります。</p>"
                  f"<div class='grid2'>{''.join(p for p in parts if p)}</div>")
 
     # 検証
     btsec = "<h2>過去データでの検証</h2>"
     if bt and bt.get("ok"):
         btsec += (f"<div class='status'>"
-                  f"<div class='box'><b>{bt['hit']*100:.1f}%</b><span>上位{bt['top_k']}台予想が、その日の推定上位{bt['top_k']}台に入った率"
-                  f"（ランダムなら{bt['rand_hit']*100:.1f}%）</span></div>"
+                  + (f"<div class='box'><b>{bt['top_y']*100:.1f}%</b><span>予想上位{bt['top_k']}台のプラス終了率"
+                     f"（全台 {bt['all_y']*100:.1f}%）</span></div>"
+                     if cfg.goal == "plus" and "top_y" in bt else
+                     f"<div class='box'><b>{bt['hit']*100:.1f}%</b><span>上位{bt['top_k']}台予想が、その日の推定上位{bt['top_k']}台に入った率"
+                     f"（ランダムなら{bt['rand_hit']*100:.1f}%）</span></div>") +
                   f"<div class='box'><b>{bt['top_diff']:+,.0f}枚</b><span>予想上位{bt['top_k']}台の平均差枚（全台平均 {bt['all_diff']:+,.0f}枚）</span></div>"
                   f"<div class='box'><b>{bt['win_days']*100:.0f}%</b><span>予想上位が全台平均を上回った日の割合</span></div>"
                   f"<div class='box'><b>{bt['days']}日</b><span>検証日数（データ公開の遅れ {bt['lag']}日を想定）</span></div></div>"

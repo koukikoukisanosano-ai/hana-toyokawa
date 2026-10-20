@@ -39,6 +39,7 @@ def _evaluate(rows, X, cols, cfg, test_dates, lag, top_k, refit_every, first) ->
             "date": d.date(),
             "n": len(dd),
             "top_p": top["p_high"].mean(), "all_p": dd["p_high"].mean(),
+            "top_y": top["y"].mean(), "all_y": dd["y"].mean(),
             "top_e": top["e_set"].mean(), "all_e": dd["e_set"].mean(),
             "top_diff": top["diff"].mean(), "all_diff": dd["diff"].mean(),
             "hit": len(best & set(top["unit"])) / top_k,
@@ -88,7 +89,10 @@ def select_factors(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, day
         pd_ = _evaluate(rows, X, order(cs), cfg, test_dates, lag, top_k, refit_every, first)
         if not pd_:
             return (float("nan"),) * 3
-        v = (pd.DataFrame(pd_)["top_p"] - pd.DataFrame(pd_)["all_p"]).to_numpy()
+        t = pd.DataFrame(pd_)
+        # plus: 上位の台のプラス終了率（全台との差）＋平均差枚（1000枚=1として）の両方で採点
+        v = ((t["top_y"] - t["all_y"]) + (t["top_diff"] - t["all_diff"]) / 1000.0).to_numpy() \
+            if cfg.goal == "plus" else (t["top_p"] - t["all_p"]).to_numpy()
         return float(v.mean()), float(v[0::2].mean()), float(v[1::2].mean())
 
     chosen: list[str] = []
@@ -137,6 +141,7 @@ def run(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, days: int = 60
         "ok": True, "days": len(t), "lag": lag, "top_k": top_k,
         "top_e": t["top_e"].mean(), "all_e": t["all_e"].mean(),
         "top_p": t["top_p"].mean(), "all_p": t["all_p"].mean(),
+        "top_y": t["top_y"].mean(), "all_y": t["all_y"].mean(),
         "top_diff": t["top_diff"].mean(), "all_diff": t["all_diff"].mean(),
         "hit": t["hit"].mean(), "rand_hit": t["rand_hit"].mean(),
         "win_days": float((t["top_diff"] > t["all_diff"]).mean()),

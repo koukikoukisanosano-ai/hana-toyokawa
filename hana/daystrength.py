@@ -1,9 +1,6 @@
 """店全体の「日の強さ」。日付末尾（旧イベント日かどうか）と曜日ごとに、
-ハナハナ全台の「判定設定が高設定だった台の割合」と平均差枚を集計し、今日と今後1週間の強さを見積もる。
-
-63日分のデータで、0・5のつく日は全台平均+172枚・高設定っぽい台36%（その他の日は−64枚・25%）。
-その日より前のデータだけで見積もった強さと実際の強さの相関は0.37（42日で検証）。
-台ごとの差より、日による差のほうがはっきり出ている。
+ハナハナ全台の「プラス終了の台の割合」（goal=high なら高設定判定の割合）と平均差枚を集計し、
+今日と今後1週間の強さを見積もる。
 """
 from __future__ import annotations
 
@@ -15,10 +12,10 @@ import pandas as pd
 WEEKDAY = "月火水木金土日"
 
 
-def _day_table(hist: pd.DataFrame, high_min: int) -> pd.DataFrame:
-    h = hist.dropna(subset=["judge"])
-    h = h[h["games"] >= 1000]
-    t = h.assign(hi=(h["judge"] >= high_min).astype(float), plus=(h["diff"] > 0).astype(float)) \
+def _day_table(hist: pd.DataFrame, high_min: int, goal: str = "plus") -> pd.DataFrame:
+    h = hist[hist["games"] >= 1000].dropna(subset=["diff"])
+    hi = (h["diff"] > 0) if goal == "plus" else (h["judge"] >= high_min)
+    t = h.assign(hi=hi.astype(float), plus=(h["diff"] > 0).astype(float)) \
          .groupby("date").agg(hi=("hi", "mean"), diff=("diff", "mean"), plus=("plus", "mean"), n=("hi", "size")).reset_index()
     t = t[t["n"] >= 15]
     t["date"] = pd.to_datetime(t["date"])
@@ -29,8 +26,9 @@ def group_of(d, event_digits) -> str:
     return "旧イベ日" if d.day % 10 in event_digits else "通常日"
 
 
-def estimate(hist: pd.DataFrame, target: Date, event_digits, high_min: int = 5, days: int = 7) -> dict:
-    t = _day_table(hist, high_min)
+def estimate(hist: pd.DataFrame, target: Date, event_digits, high_min: int = 5, days: int = 7,
+             goal: str = "plus") -> dict:
+    t = _day_table(hist, high_min, goal)
     if len(t) < 14:
         return {}
     t["g"] = [group_of(d, event_digits) for d in t["date"]]

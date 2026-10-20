@@ -186,14 +186,16 @@ def parse_unit_history(html: str, today: Date) -> list[dict]:
 def est_diff(bb, rb, games, model: str = "", coef=None) -> int | None:
     """差枚が伏せられているとき（みんレポで ±1 や - と表示）は、機種ごとの
     BIG獲得枚数・REG獲得枚数・コイン持ちから計算する:
-      差枚 ＝ BIG回数×BIG枚数 ＋ REG回数×REG枚数 − G数×(50 ÷ コイン持ち)
+      差枚 ＝ BIG回数×BIG枚数 ＋ REG回数×REG枚数 − G数×(1Gあたりの実質消費)
+    実質消費はコイン持ちを公表の機械割に合うように調整した値（specs.coin_use_per_game）。
     機種のスペックが未登録なら、実データで合わせた係数で見積もる。"""
     if bb is None or rb is None or games is None:
         return None
-    from ..specs import spec_for
+    from ..specs import coin_use_per_game, spec_for
     sp = spec_for(model)
-    if sp.big_coins and sp.reg_coins and sp.coin_mochi:
-        return int(round(bb * sp.big_coins + rb * sp.reg_coins - games * 50.0 / sp.coin_mochi))
+    c = coin_use_per_game(sp)
+    if c:
+        return int(round(bb * sp.big_coins + rb * sp.reg_coins - games * c))
     a, b, c = coef or DEFAULT_COEF
     return int(round(a * bb + b * rb + c * games))
 

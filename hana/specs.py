@@ -89,3 +89,16 @@ def spec_for(model: str) -> Spec:
         if normalize(key) in n:
             return spec
     return GENERIC
+
+
+def coin_use_per_game(sp: Spec) -> float | None:
+    """1Gあたりの実質のコイン消費（小役の戻りを差し引いた枚数）。
+    公表の機械割があれば、各設定で「BIG枚数÷BIG分母＋REG枚数÷REG分母−3×(機械割−1)」を計算した平均を使う
+    （＝その機種のBIG・REG枚数と機械割に合うコイン持ち）。無ければ 50÷コイン持ち。"""
+    if not (sp.big_coins and sp.reg_coins):
+        return None
+    vals = [sp.big_coins / b + sp.reg_coins / r - 3 * (p / 100 - 1)
+            for b, r, p in zip(sp.bb, sp.rb, sp.payout) if b and r and p]
+    if vals:
+        return sum(vals) / len(vals)
+    return 50.0 / sp.coin_mochi if sp.coin_mochi else None
