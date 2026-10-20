@@ -18,8 +18,8 @@ target:
   # 島の区切り（角台の判定用）。台番が分かったら入れてください。例: islands: [[101, 110], [111, 120]]
   islands: []
 
-history:
-  minrepo_minutes: 20       # みんレポから過去分を取る時間（毎晩。取り終わると何もしません）
+minrepo:
+  minutes_per_run: 18       # 1回の実行（1時間ごと）でみんレポから取る時間（分）。取り終えたら新しい日だけ取ります
   since: 2025-01-01         # この日以降の過去分を取る
 
 phone:
@@ -32,7 +32,7 @@ fetch:
   jitter_sec: 30
   backoff_min: 20           # アクセス制限(403)が出たときに休む時間（分）
   daily_max_pages: 8
-  minrepo_interval_sec: 8
+  minrepo_interval_sec: 6   # みんレポ 1ページごとの待ち時間（秒）
   engine: auto              # auto / requests / playwright
 
 predict:

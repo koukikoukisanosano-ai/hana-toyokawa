@@ -134,6 +134,57 @@ def cmd_minrepo_recent(cfg, db, stats: dict) -> dict:
     return stats
 
 
+def cmd_minrepo_sync(cfg, db, root: Path, minutes: float | None = None) -> dict:
+    """みんレポから、まだ取っていない日を新しい順に正確な値（BB/RB回数）で取得する。
+    1回の実行で minutes 分だけ取り、残りは次回の実行で続きから。"""
+    mc = cfg.get("minrepo", {})
+    minutes = float(mc.get("minutes_per_run", 18) if minutes is None else minutes)
+    since = str(mc.get("since", "2025-01-01"))
+    deadline = time.time() + minutes * 60
+    now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+    interval = cfg["fetch"].get("minrepo_interval_sec", 6)
+    f = Fetcher(interval_sec=interval, jitter_sec=2)
+    mr = MR.MinRepo(db, f, cfg["hall"]["minrepo_tag_url"], cfg["target"].get("keyword", "ハナハナ"),
+                    interval=interval)
+    got, blocked, err = [], False, ""
+    try:
+        full = not db.index("minrepo") or datetime.now(JST).hour == 3
+        links = mr.refresh_index(today_jst(), all_pages=full)
+        if not full:
+            links = list(db.index("minrepo").items())
+        done = db.fetched_dates("minrepo")
+        todo = [(d, u) for d, u in sorted(links, reverse=True) if d >= since and d not in done]
+        log.info("みんレポ: 未取得 %d日（%s 以降）", len(todo), since)
+        for d, u in todo:
+            if time.time() > deadline:
+                break
+            try:
+                n = mr.fetch_day(d, u, precise=True)
+                got.append(d)
+                log.info("みんレポ: %s ハナハナ %d台", d, n)
+            except RateLimited:
+                blocked = True
+                log.warning("みんレポ: アクセス制限。続きは次回")
+                break
+            except Exception as e:
+                log.warning("みんレポ: %s の取得失敗: %s", d, e)
+            db.export_csv(root / "data", keyword=cfg["target"].get("keyword", "ハナハナ"))
+        remain = max(0, len(todo) - len(got))
+    except RateLimited as e:
+        blocked, remain, err = True, None, str(e)
+    except Exception as e:
+        blocked, remain, err = False, None, str(e)[:120]
+        log.error("みんレポの取得でエラー: %s", e)
+    f.close()
+    result = "ok" if got or (not blocked and not err) else ("blocked" if blocked else "error")
+    msg = f"{len(got)}日分を取得" + (f"・残り{remain}日" if remain else "") + (f"（{err}）" if err and not got else "")
+    kw = {"mode": "minrepo", "minrepo_last": now, "minrepo_result": result, "minrepo_message": msg}
+    if got:
+        kw["minrepo_ok"] = now
+    write_status(root, **kw)
+    return {"days": len(got), "remain": remain, "blocked": blocked}
+
+
 def cmd_inbox(cfg, db, root: Path) -> dict:
     """iPhone から届いたデータを取り込み、次に取りに行くページの一覧を更新する。"""
     from .sources import gh_inbox, phone
@@ -313,6 +364,8 @@ def status_line(root: Path) -> str:
         st = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return ""
+    if st.get("mode") == "minrepo":
+        return f"みんレポの最終取得: {st.get('minrepo_last', 'まだありません')}" + (f"（{st['minrepo_message']}）" if st.get('minrepo_message') else "")
     if st.get("mode") == "phone":
         return f"iPhoneからの最終受信: {st.get('phone_last', 'まだありません')}" + (f"（{st['phone_message']}）" if st.get('phone_message') else "")
     return ""
@@ -327,6 +380,11 @@ def status_warnings(root: Path) -> list[str]:
     except Exception:
         return []
     out = []
+    if st.get("mode") == "minrepo":
+        if st.get("minrepo_result") in ("blocked", "error"):
+            out.append(f"みんレポから取得できませんでした（{st.get('minrepo_last')}：{st.get('minrepo_message', '')}）。"
+                       f"最後に取得できたのは {st.get('minrepo_ok', 'なし')} です。次回の実行で自動的に再試行します。")
+        return out
     if st.get("mode") == "phone":
         last = st.get("phone_last")
         if not last:
@@ -442,6 +500,7 @@ def main(argv=None) -> int:
         log.info("検証結果: %s", {k: (round(v, 3) if isinstance(v, float) else v) for k, v in r.items()})
     elif a.cmd == "inbox":
         cmd_inbox(cfg, db, root)
+        cmd_minrepo_sync(cfg, db, root)
         if need_backtest(root):
             try:
                 cmd_backtest(cfg, db, root)
@@ -451,8 +510,7 @@ def main(argv=None) -> int:
         write_next(cfg, db, root)
     elif a.cmd == "daily":
         cmd_inbox(cfg, db, root)
-        if fetch_ok:
-            cmd_update(cfg, db)
+        cmd_minrepo_sync(cfg, db, root)
         if need_backtest(root):   # 週1回（検証できるだけのデータがまだない間は毎回）
             try:
                 cmd_backtest(cfg, db, root)

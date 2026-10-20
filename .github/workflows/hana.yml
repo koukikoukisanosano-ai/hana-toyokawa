@@ -3,8 +3,7 @@ name: ハナハナ予想（豊川）
 on:
   schedule:
     - cron: '46 22 * * *'    # 毎朝 7:46（日本時間）: 今日の予想ページを作成
-    - cron: '23 17 * * *'    # 毎晩 2:23（日本時間）: みんレポから過去分を少しずつ取得（取り終えたら何もしない）
-    - cron: '37 * * * *'     # 1時間ごと: 取りに行くページの一覧を入れ替え（届かない日付を後ろへ）＋取りこぼしの処理
+    - cron: '37 * * * *'     # 1時間ごと: みんレポから未取得の日を取得して予想を更新
   issue_comment:
     types: [created]                         # iPhoneからデータが届いたとき
   push:
@@ -13,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'inbox=受信データを処理して予想 / daily=朝の処理 / history=みんレポ過去分 / diag=接続診断'
+        description: 'inbox=みんレポ取得と予想 / daily=朝の処理 / diag=接続診断'
         type: choice
-        options: [inbox, daily, history, diag]
+        options: [inbox, daily, diag]
         default: inbox
 
 permissions:
@@ -57,7 +56,6 @@ jobs:
           if [ -z "$MODE" ]; then
             case "${{ github.event.schedule }}" in
               "46 22 * * *") MODE=daily ;;
-              "23 17 * * *") MODE=history ;;
               *) MODE=inbox ;;
             esac
           fi
@@ -65,10 +63,6 @@ jobs:
           if [ "$MODE" = "diag" ]; then
             pip install playwright && python -m playwright install --with-deps chromium
             python -m hana diag || true
-            MODE=inbox
-          fi
-          if [ "$MODE" = "history" ]; then
-            python -m hana minrepo-history || true
             MODE=inbox
           fi
           python -m hana $MODE
