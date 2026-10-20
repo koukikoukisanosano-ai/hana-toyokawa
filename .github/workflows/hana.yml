@@ -48,7 +48,9 @@ jobs:
           cache: pip
 
       - name: 準備
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt playwright
+          python -m playwright install --with-deps chromium
 
       - name: 受信データの処理と予想
         run: |

@@ -32,7 +32,8 @@ fetch:
   jitter_sec: 30
   backoff_min: 20           # アクセス制限(403)が出たときに休む時間（分）
   daily_max_pages: 8
-  minrepo_interval_sec: 6   # みんレポ 1ページごとの待ち時間（秒）
+  minrepo_interval_sec: 2   # みんレポ 1ページごとの待ち時間（秒）
+  minrepo_engine: playwright  # みんレポは確認ページがあるので本物のブラウザ(Chromium)で開く
   engine: auto              # auto / requests / playwright
 
 predict:

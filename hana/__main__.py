@@ -142,8 +142,8 @@ def cmd_minrepo_sync(cfg, db, root: Path, minutes: float | None = None) -> dict:
     since = str(mc.get("since", "2025-01-01"))
     deadline = time.time() + minutes * 60
     now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
-    interval = cfg["fetch"].get("minrepo_interval_sec", 6)
-    f = Fetcher(interval_sec=interval, jitter_sec=2)
+    interval = cfg["fetch"].get("minrepo_interval_sec", 2)
+    f = Fetcher(interval_sec=interval, jitter_sec=1, engine=cfg["fetch"].get("minrepo_engine", "playwright"))
     mr = MR.MinRepo(db, f, cfg["hall"]["minrepo_tag_url"], cfg["target"].get("keyword", "ハナハナ"),
                     interval=interval)
     got, blocked, err = [], False, ""

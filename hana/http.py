@@ -113,14 +113,30 @@ class Fetcher:
             res = page.evaluate(
                 "async (u) => { const r = await fetch(u); return [r.status, await r.text()]; }", url)
             status, text = res
+            if len(text) < 3000:      # 確認ページが返ってきた → 普通に開き直す
+                status, text = self._goto(page, url)
         else:
-            resp = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-            status, text = (resp.status if resp else 0), page.content()
+            status, text = self._goto(page, url)
         if status in (403, 429):
             raise RateLimited(f"{status} {url}")
         if status >= 400:
             raise requests.HTTPError(f"{status} {url}")
         return text
+
+    def _goto(self, page, url: str):
+        """ページを開く。最初に確認用の小さなページが出たら、自動の再読み込みを待ってから中身を取る。"""
+        resp = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+        status, text = (resp.status if resp else 0), page.content()
+        for _ in range(4):
+            if len(text) >= 3000:
+                break
+            page.wait_for_timeout(2000)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            text = page.content()
+        return status, text
 
     def close(self) -> None:  # noqa: D401
         if self._pw is not None:
