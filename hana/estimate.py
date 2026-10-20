@@ -108,3 +108,28 @@ def gassan_to_setting(gassan: float, model: str = "") -> float:
     idx = [i for i, v in enumerate(sp.bb) if v is not None]
     g = np.array([1.0 / (1.0 / sp.bb[i] + 1.0 / sp.rb[i]) for i in idx])
     return float(np.interp(-gassan, -g, np.array(idx, dtype=float) + 1))
+
+
+def variation_test(df: pd.DataFrame, min_games: int = 2000) -> dict:
+    """店の設定にばらつきがあるか（高設定を入れているか）をデータ全体で確かめる。
+
+    「全台・全日が同じ設定」とした場合と「設定が混ざっている」とした場合の当てはまりの差（対数尤度差）。
+    全台同じ設定でも偶然で0前後は出る。目安: 10未満=ばらつきは見えない / 10〜30=少し / 30以上=はっきり。
+    検出の目安（約1万台日の場合）: 1日に設定6が3台、または設定4が5台入っていれば20以上になる。
+    """
+    d = df[df["games"].fillna(0) >= min_games].dropna(subset=["bb", "rb"])
+    if len(d) < 500:
+        return {"ok": False}
+    ll = loglik_matrix(d)
+    prior = fit_prior(ll, smooth=0.0)
+    best = int(np.argmax(ll.sum(axis=0)))
+    mx = ll.max(axis=1, keepdims=True)
+    lmix = float((np.log(np.exp(ll - mx) @ prior) + mx[:, 0]).sum())
+    lr = lmix - float(ll[:, best].sum())
+    out = {"ok": True, "lr": round(lr, 1), "best": best + 1, "n": len(d), "days": int(d["date"].nunique()),
+           "models": {}}
+    for m, g in d.groupby("model"):
+        G = g["games"].sum()
+        out["models"][m] = {"gassan": round(G / max(g["bb"].sum() + g["rb"].sum(), 1), 1),
+                            "reg": round(G / max(g["rb"].sum(), 1), 1)}
+    return out

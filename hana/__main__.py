@@ -19,6 +19,8 @@ import webbrowser
 from datetime import date as Date, datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
+
 from . import backtest as BT
 from . import config as C
 from . import model as M
@@ -314,7 +316,11 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
 
 
 def run_checks(cfg, db, root: Path) -> None:
-    """要因の選び直し（週1回・データが2割増えたとき）と、予想の検証（週1回）。"""
+    """休業日の候補の記録、要因の選び直し（週1回・データが2割増えたとき）、予想の検証（週1回）。"""
+    try:
+        detect_closed_days(cfg, db, root)
+    except Exception as e:
+        log.warning("休業日の確認でエラー: %s", e)
     try:
         cmd_select(cfg, db, root)
     except Exception as e:
@@ -408,7 +414,7 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
         log.warning("環境の記録に失敗: %s", e)
     path = R.build(m, pred, target, cfg["hall"].get("name", ""), cfg["predict"].get("top_n", 10),
                    load_backtest(root), db.coverage(), root / "output",
-                   extra_warns=closed_notes(s, units, target) + status_warnings(root),
+                   extra_warns=variation_note(units, s) + closed_notes(s, units, target) + status_warnings(root),
                    pred_dir=pred_dir, info_line=status_line(root))
     if cfg.get("storage") == "csv":   # 答え合わせ用に予想を保存
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -419,6 +425,52 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     if open_browser:
         webbrowser.open((root / "output" / "latest.html").resolve().as_uri())
     return path
+
+
+def variation_note(units, s) -> list[str]:
+    """店全体の設定のばらつき（高設定を入れているか）のお知らせ。"""
+    from .estimate import variation_test
+    from .specs import spec_for
+    d = units[units["model"].str.contains(s.keyword, na=False)].copy()
+    if d.empty:
+        return []
+    d["date"] = pd.to_datetime(d["date"])
+    v = variation_test(d, s.judge_min_games)
+    if not v.get("ok"):
+        return []
+    eq = []
+    for m, x in v["models"].items():
+        sp = spec_for(m)
+        gs = [(i + 1, 1 / (1 / b + 1 / r)) for i, (b, r) in enumerate(zip(sp.bb, sp.rb)) if b]
+        near = min(gs, key=lambda t: abs(t[1] - x["gassan"]))[0]
+        eq.append(f"{m.split('‐')[0].split('-')[0]} 合算1/{x['gassan']:.0f}（設定{near}相当）")
+    head = f"この店のハナハナ全体（{v['days']}日・{v['n']:,}台日）: " + "・".join(eq) + "。"
+    if v["lr"] < 10:
+        return [head + f"台ごと・日ごとの数字のばらつきが「全台同じ設定」とした場合の運の範囲に収まっていて"
+                       f"（判定値 {v['lr']:.0f}／10未満）、高設定を入れている形跡が見つかりません。"
+                       "1日に設定6が3台・設定4が5台以上あればデータに表れるはずなので、それより少ないと考えられます。"
+                       "ランキングは参考程度に見てください。"]
+    if v["lr"] < 30:
+        return [head + f"設定のばらつきは少しだけ見えます（判定値 {v['lr']:.0f}）。高設定はごく少数と考えられます。"]
+    return [head + f"設定のばらつきがはっきり見えます（判定値 {v['lr']:.0f}）。高設定を入れている店です。"]
+
+
+def detect_closed_days(cfg, db, root: Path) -> list[str]:
+    """みんレポに日別ページが無い日（前後の日はある）を休業日の候補として data/closed_days.txt に記録する。"""
+    idx = sorted(db.index("minrepo"))
+    since = str(cfg.get("minrepo", {}).get("since", "2025-01-01"))
+    idx = [d for d in idx if d >= since]
+    if len(idx) < 30:
+        return []
+    have = set(idx)
+    gaps = [d.date().isoformat() for d in pd.date_range(idx[0], idx[-1]) if d.date().isoformat() not in have]
+    p = root / "data" / "closed_days.txt"
+    old = set(p.read_text(encoding="utf-8").split()) if p.exists() else set()
+    new = sorted(old | set(gaps))
+    if new != sorted(old):
+        p.write_text("\n".join(new) + "\n", encoding="utf-8")
+        log.info("休業日の候補（みんレポに掲載なし）: %s", ", ".join(sorted(set(gaps) - old)))
+    return new
 
 
 def closed_notes(s, units, target: Date) -> list[str]:
