@@ -1,0 +1,101 @@
+{
+ "ok": true,
+ "best": "ridge",
+ "summary": {
+  "prev_rank": {
+   "label": "前日の差枚順位そのまま",
+   "rho": 0.0097,
+   "se": 0.0094,
+   "rho_first": -0.0195,
+   "rho_second": 0.0386,
+   "pos_days": 0.548,
+   "top5_diff": 103.0,
+   "all_diff": 100.9,
+   "top5_plus": 0.432,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "prev_rank_rev": {
+   "label": "前日の差枚順位の逆",
+   "rho": -0.0097,
+   "se": 0.0094,
+   "rho_first": 0.0195,
+   "rho_second": -0.0386,
+   "pos_days": 0.452,
+   "top5_diff": 111.1,
+   "all_diff": 100.9,
+   "top5_plus": 0.449,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "unit_mean": {
+   "label": "台ごとのこれまでの平均順位",
+   "rho": 0.0016,
+   "se": 0.0092,
+   "rho_first": -0.018,
+   "rho_second": 0.021,
+   "pos_days": 0.472,
+   "top5_diff": 97.1,
+   "all_diff": 100.9,
+   "top5_plus": 0.445,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "factor": {
+   "label": "店の癖の掛け算（これまでの方法）",
+   "rho": 0.0037,
+   "se": 0.0094,
+   "rho_first": -0.0216,
+   "rho_second": 0.0287,
+   "pos_days": 0.492,
+   "top5_diff": 117.3,
+   "all_diff": 100.9,
+   "top5_plus": 0.451,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "ridge": {
+   "label": "全特徴の重み付き足し算（リッジ回帰）",
+   "rho": 0.0137,
+   "se": 0.0088,
+   "rho_first": 0.0027,
+   "rho_second": 0.0246,
+   "pos_days": 0.523,
+   "top5_diff": 111.7,
+   "all_diff": 100.9,
+   "top5_plus": 0.446,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "gbm": {
+   "label": "勾配ブースティング木（機械学習）",
+   "rho": 0.0095,
+   "se": 0.0092,
+   "rho_first": 0.0019,
+   "rho_second": 0.0171,
+   "pos_days": 0.528,
+   "top5_diff": 136.7,
+   "all_diff": 100.9,
+   "top5_plus": 0.469,
+   "all_plus": 0.446,
+   "days": 199
+  },
+  "ensemble": {
+   "label": "リッジと機械学習の平均",
+   "rho": 0.0132,
+   "se": 0.0087,
+   "rho_first": 0.0044,
+   "rho_second": 0.022,
+   "pos_days": 0.538,
+   "top5_diff": 125.6,
+   "all_diff": 100.9,
+   "top5_plus": 0.459,
+   "all_plus": 0.446,
+   "days": 199
+  }
+ },
+ "test_days": 199,
+ "n_days": 259,
+ "when": "2026-10-21",
+ "goal": "rank"
+}
