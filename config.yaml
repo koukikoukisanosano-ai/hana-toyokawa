@@ -15,13 +15,13 @@ hall:
 
 target:
   keyword: ハナハナ         # 機種名にこの文字を含む台が対象
-  high_min: 5               # 「高設定」とみなす設定（5なら設定5・6）
+  high_min: 4               # 「高設定」とみなす設定（この店は5・6をほぼ使わないので4以上を狙う）
   judge_min_games: 2000     # これ未満のG数の日は設定を判定しない
   # 島の区切り（角台の判定用）。台番が分かったら入れてください。例: islands: [[101, 110], [111, 120]]
   islands: []
 
 minrepo:
-  minutes_per_run: 18       # 1回の実行（30分ごと）でみんレポから取る時間（分）。取り終えたら新しい日だけ取ります
+  minutes_per_run: 22       # 1回の実行（30分ごと）でみんレポから取る時間（分）。取り終えたら新しい日だけ取ります
   since: 2025-01-01         # この日以降の過去分を取る
 
 phone:
@@ -35,6 +35,7 @@ fetch:
   backoff_min: 20           # アクセス制限(403)が出たときに休む時間（分）
   daily_max_pages: 8
   minrepo_interval_sec: 2   # みんレポ 1ページごとの待ち時間（秒）
+  minrepo_parallel: 3        # みんレポの台ページを同時に開く数
   minrepo_engine: playwright  # みんレポは確認ページがあるので本物のブラウザ(Chromium)で開く
   engine: auto              # auto / requests / playwright
 

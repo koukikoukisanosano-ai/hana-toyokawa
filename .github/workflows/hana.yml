@@ -32,7 +32,7 @@ jobs:
     # コメントで起動したときは、持ち主のコメントだけ処理する
     if: github.event_name != 'issue_comment' || github.event.comment.user.login == github.repository_owner
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       TZ: Asia/Tokyo
       PYTHONUTF8: '1'

@@ -145,7 +145,7 @@ def cmd_minrepo_sync(cfg, db, root: Path, minutes: float | None = None) -> dict:
     interval = cfg["fetch"].get("minrepo_interval_sec", 2)
     f = Fetcher(interval_sec=interval, jitter_sec=1, engine=cfg["fetch"].get("minrepo_engine", "playwright"))
     mr = MR.MinRepo(db, f, cfg["hall"]["minrepo_tag_url"], cfg["target"].get("keyword", "ハナハナ"),
-                    interval=interval)
+                    interval=interval, parallel=int(cfg["fetch"].get("minrepo_parallel", 3)))
     got, blocked, err = [], False, ""
     try:
         full = not db.index("minrepo") or datetime.now(JST).hour == 3

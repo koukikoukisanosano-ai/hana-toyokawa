@@ -123,6 +123,33 @@ class Fetcher:
             raise requests.HTTPError(f"{status} {url}")
         return text
 
+    def get_many(self, urls: list[str], referer: str, parallel: int = 3) -> list[str]:
+        """同じサイトの複数ページを、parallel 件ずつ同時に取る（ブラウザ方式のときだけ同時。それ以外は1件ずつ）。"""
+        if self.mode != "playwright" or parallel <= 1:
+            return [self.get(u, referer=referer) for u in urls]
+        out: list[str] = []
+        for i in range(0, len(urls), parallel):
+            chunk = urls[i:i + parallel]
+            self._wait()
+            try:
+                if self._pw is None:
+                    self.get(referer)       # ブラウザを起動して確認を通しておく
+                page = self._pw
+                if unquote(page.url) != unquote(referer):
+                    page.goto(referer, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                res = page.evaluate(
+                    "async (us) => Promise.all(us.map(async u => { try { const r = await fetch(u);"
+                    " return [r.status, await r.text()]; } catch (e) { return [0, '']; } }))", chunk)
+            finally:
+                self._last = time.time()
+            for u, (status, text) in zip(chunk, res):
+                if status in (403, 429):
+                    raise RateLimited(f"{status} {u}")
+                if status >= 400 or len(text) < 3000:   # 確認ページなど → 1件ずつ開き直す
+                    status, text = self._goto(self._pw, u)
+                out.append(text)
+        return out
+
     def _goto(self, page, url: str):
         """ページを開く。最初に確認用の小さなページが出たら、自動の再読み込みを待ってから中身を取る。"""
         resp = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)

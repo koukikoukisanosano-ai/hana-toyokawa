@@ -241,8 +241,9 @@ def estimate_bb_rb(diff, games, total, coef) -> tuple[int | None, int | None]:
 
 # ---- 取得処理 ----
 class MinRepo:
-    def __init__(self, db, fetcher: Fetcher, tag_url: str, keyword: str, interval: float = 6):
+    def __init__(self, db, fetcher: Fetcher, tag_url: str, keyword: str, interval: float = 6, parallel: int = 1):
         self.db, self.f, self.tag_url, self.kw, self.interval = db, fetcher, tag_url.rstrip("/") + "/", keyword, interval
+        self.parallel = parallel
 
     def refresh_index(self, today: Date, all_pages: bool = False) -> list[tuple[str, str]]:
         html = self.f.get(self.tag_url, interval=self.interval)
@@ -297,8 +298,9 @@ class MinRepo:
             out = []
             extra: dict[str, list[dict]] = {}
             done = self.db.fetched_dates("minrepo")
-            for r in rows:
-                h = self.f.get(f"{url.rstrip('/')}/?num={r['unit']}", referer=url, interval=self.interval)
+            pages = self.f.get_many([f"{url.rstrip('/')}/?num={r['unit']}" for r in rows], referer=url,
+                                    parallel=self.parallel)
+            for r, h in zip(rows, pages):
                 info = parse_unit_page(h)
                 try:   # 台番ページには過去数日分も載っているので、まだ取っていない日はここで一緒に取る
                     for hrow in parse_unit_history(h, Date.fromisoformat(date) + timedelta(days=1)):
