@@ -273,8 +273,52 @@ def need_backtest(root: Path) -> bool:
     return today_jst().weekday() == 0 and bt.get("when") != str(today_jst())
 
 
+def load_factors(root: Path) -> None:
+    """この店のデータで選んだ要因（data/factors.json）を読み込む。まだ無ければ初期値のまま。"""
+    p = root / "data" / "factors.json"
+    try:
+        f = json.loads(p.read_text(encoding="utf-8"))
+        if f.get("ok") and f.get("active"):
+            M.use_factors(f["active"], {"source": "selected", **f})
+    except Exception:
+        pass
+
+
+def need_selection(root: Path, n_days: int) -> bool:
+    p = root / "data" / "factors.json"
+    try:
+        f = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    if not f.get("ok"):
+        return True
+    when = Date.fromisoformat(f.get("when", "2000-01-01"))
+    # 週1回、またはデータが2割以上増えたら選び直す
+    return (today_jst() - when).days >= 7 or n_days >= int(f.get("n_days", 0) * 1.2) + 1
+
+
+def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
+    units, hall = db.units(cfg["target"].get("keyword", "ハナハナ")), db.hall_days()
+    n_days = units["date"].nunique() if len(units) else 0
+    if not force and not need_selection(root, n_days):
+        return None
+    res = BT.select_factors(units, hall, C.model_settings(cfg))
+    res["when"] = str(today_jst())
+    (root / "data" / "factors.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    if res.get("ok"):
+        log.info("この店で使う要因を選び直しました: %s", " / ".join(s["label"] for s in res["steps"]) or "なし")
+    else:
+        log.info("要因の選び直し: %s", res.get("reason"))
+    load_factors(root)
+    return res
+
+
 def cmd_backtest(cfg, db, root: Path, days=90, lag=None) -> dict:
     units, hall = db.units(cfg["target"].get("keyword", "ハナハナ")), db.hall_days()
+    try:
+        cmd_select(cfg, db, root)
+    except Exception as e:
+        log.warning("要因の選び直しでエラー（前回の選択のまま続行）: %s", e)
     if lag is None:
         lag = estimate_lag(db)
     res = BT.run(units, hall, C.model_settings(cfg), days=days, lag=lag)
@@ -479,6 +523,7 @@ def main(argv=None) -> int:
     p.add_argument("--since")
     p.add_argument("--hours", type=float)
     sub.add_parser("status")
+    sub.add_parser("select")
     sub.add_parser("import-seed")
     sub.add_parser("diag")
     sub.add_parser("inbox")
@@ -487,6 +532,7 @@ def main(argv=None) -> int:
     root = C.ROOT
     setup_logging(root)
     cfg = C.load()
+    load_factors(root)
     csv_mode = cfg.get("storage") == "csv"
     db_path = root / "data" / "hana.db"
     if csv_mode and db_path.exists():
@@ -564,6 +610,9 @@ def main(argv=None) -> int:
         n = mr.backfill_history(today_jst(), before=first, since=since, coef=coef,
                                 deadline=time.time() + hours * 3600)
         log.info("みんレポ過去分 %d 台日を保存", n)
+    elif a.cmd == "select":
+        r = cmd_select(cfg, db, root, force=True)
+        log.info("選択結果: %s", json.dumps({k: v for k, v in (r or {}).items() if k != "single"}, ensure_ascii=False))
     elif a.cmd == "status":
         print(json.dumps(db.coverage(), ensure_ascii=False, indent=1))
         print("アナスロ未取得:", len(set(db.index("anaslo")) - db.fetched_dates("anaslo")), "日")

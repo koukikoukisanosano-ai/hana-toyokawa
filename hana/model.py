@@ -25,17 +25,50 @@ from .estimate import add_estimates
 
 WEEKDAY = "月火水木金土日"
 
-# 因子名 → (表示名, 縮小の強さm)
-FACTORS = {
-    # 63日分の検証（各日をその日より前のデータだけで予想）で効いたものだけを使う。
-    # 台番・末尾・角台・台ごとの実績・前日差枚などは、翌日以降ほとんど続かず精度を下げたので外した。
+# 因子名 → (表示名, 縮小の強さm)。どれを使うかは店ごとに検証して自動で選ぶ（backtest.select_factors）
+ALL_FACTORS = {
     "f_digit":    ("日付末尾", 90.0),
     "f_wday":     ("曜日", 90.0),
     "f_special":  ("特定日", 90.0),
-    "f_seq2":     ("2日前→前日の流れ", 20.0),
-    "f_seq3":     ("3日前→前日の流れ", 30.0),
+    "f_seq2":     ("2日前→前日の判定の流れ", 20.0),
+    "f_seq3":     ("3日前→前日の判定の流れ", 30.0),
+    "f_unit":     ("台ごとの入りやすさ", 30.0),
+    "f_udigit":   ("台番末尾", 60.0),
+    "f_match":    ("台番末尾と日付末尾の一致", 60.0),
+    "f_corner":   ("角台", 60.0),
+    "f_prevdiff": ("前日の差枚（凹み→上げ など）", 40.0),
+    "f_prevhigh": ("前日の高設定挙動（据え置き）", 40.0),
+    "f_streak":   ("連続凹み日数", 40.0),
+    "f_recent":   ("直近7日の判定設定", 40.0),
 }
-HALL_FACTORS = {"h_digit": "店全体・日付末尾", "h_wday": "店全体・曜日"}
+ALL_HALL_FACTORS = {"h_digit": "店全体の日付末尾の強さ", "h_wday": "店全体の曜日の強さ"}
+# 日付・曜日などの「日」の要因は、その日の全台に同じだけ効く（台の順位は変えず、店全体の期待台数だけを動かす）ので常に使う。
+DAY_FACTORS = ["f_digit", "f_wday", "f_special", "h_digit", "h_wday"]
+# 店のデータで選び直すまでの初期値（オーギヤWOの63日検証で効いたもの）
+DEFAULT_ACTIVE = ["f_digit", "f_wday", "f_special", "f_seq2", "f_seq3", "h_digit", "h_wday"]
+
+FACTORS: dict = {}
+HALL_FACTORS: dict = {}
+ACTIVE_INFO: dict = {"source": "default"}
+
+
+def use_factors(names, info: dict | None = None) -> None:
+    """使う要因を切り替える（並びは ALL_FACTORS → ALL_HALL_FACTORS の順にそろえる）。"""
+    FACTORS.clear()
+    FACTORS.update({k: v for k, v in ALL_FACTORS.items() if k in names})
+    HALL_FACTORS.clear()
+    HALL_FACTORS.update({k: v for k, v in ALL_HALL_FACTORS.items() if k in names})
+    ACTIVE_INFO.clear()
+    ACTIVE_INFO.update(info or {"source": "default"})
+
+
+def factor_label(c: str) -> str:
+    if c in ALL_FACTORS:
+        return ALL_FACTORS[c][0]
+    return ALL_HALL_FACTORS.get(c, c)
+
+
+use_factors(DEFAULT_ACTIVE)
 
 
 @dataclass
@@ -293,12 +326,18 @@ def hall_lift_asof(rows: pd.DataFrame, hall: pd.DataFrame, key: str, cutoff_col:
 
 
 # ---------------------------------------------------------------- 学習・予測
-def build_X(rows: pd.DataFrame, hist: pd.DataFrame, hall: pd.DataFrame, cutoff_col: str) -> pd.DataFrame:
+def build_X(rows: pd.DataFrame, hist: pd.DataFrame, hall: pd.DataFrame, cutoff_col: str,
+            names=None) -> pd.DataFrame:
+    """names を省略すると、いま使っている要因だけを計算する。"""
+    names = list(names) if names is not None else list(FACTORS) + list(HALL_FACTORS)
     X = pd.DataFrame(index=rows.index)
-    for f, (_, m) in FACTORS.items():
-        X[f] = lift_asof(rows, hist, "k" + f[1:], m, cutoff_col)
-    X["h_digit"] = hall_lift_asof(rows, hall, "k_digit", cutoff_col)
-    X["h_wday"] = hall_lift_asof(rows, hall, "k_wday", cutoff_col)
+    for f, (_, m) in ALL_FACTORS.items():
+        if f in names:
+            X[f] = lift_asof(rows, hist, "k" + f[1:], m, cutoff_col)
+    if "h_digit" in names:
+        X["h_digit"] = hall_lift_asof(rows, hall, "k_digit", cutoff_col)
+    if "h_wday" in names:
+        X["h_wday"] = hall_lift_asof(rows, hall, "k_wday", cutoff_col)
     return X
 
 
@@ -309,7 +348,8 @@ def neutralize_prev(X: pd.DataFrame, rows: pd.DataFrame) -> None:
     """前日データがまだ無い（データ公開の遅れ等）台は、前日系の要因を0にする。"""
     mask = rows["prev_p"].isna().to_numpy()
     for c in PREV_FACTORS:
-        X.loc[mask, c] = 0.0
+        if c in X.columns:
+            X.loc[mask, c] = 0.0
 
 
 def fit_combiner(X: np.ndarray, y: np.ndarray, w: np.ndarray, l2: float, base_logit: float,

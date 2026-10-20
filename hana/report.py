@@ -78,6 +78,21 @@ table.rk td.sparkc{display:none}
 """
 
 
+def factor_note(model) -> str:
+    """どの要因で順位を決めているか（この店のデータで選んだものか、初期値か）。"""
+    used = [M.factor_label(c) for c in model.cols if c not in M.DAY_FACTORS]
+    day = "日付末尾・曜日・特定日は、その日の全台に同じだけ効く（店全体の期待台数を動かす）要因として常に使っています。"
+    info = M.ACTIVE_INFO
+    if info.get("source") == "selected":
+        off = [M.factor_label(c) for c in M.ALL_FACTORS if c not in model.cols and c not in M.DAY_FACTORS]
+        head = (f"台の順位は、この店の{info.get('n_days')}日分のデータで検証して効いた要因（{'・'.join(used)}）で決めています"
+                if used else f"この店の{info.get('n_days')}日分のデータで検証したところ、台の順位に効く要因はまだ見つかっていません")
+        return (head + f"（{info.get('when')} 選択・週1回とデータが2割増えるたびに自動で選び直し）。"
+                + (f"効かなかったので使っていない要因: {'・'.join(off)}。" if off else "") + day)
+    return (f"台の順位は、初期設定の要因（{'・'.join(used)}）で決めています。"
+            "この店のデータが60日分たまると、台番・末尾・角台・前日の凹みなども含めて検証し、この店で効く要因を自動で選び直します。" + day)
+
+
 def heat_class(p: float, base: float) -> str:
     r = p / base if base > 0 else 1
     return "var(--heat4)" if r >= 1.8 else "var(--heat3)" if r >= 1.4 else "var(--heat2)" if r >= 1.15 \
@@ -408,7 +423,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     doc = (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
            f"<title>ハナハナ予想 {target:%m/%d}</title><style>{CSS}</style></head><body><div class='wrap'>"
            f"{head}{status}{warn_html}{daysec}<h2>台別ランキング</h2>"
-           f"<p class='note'>台の順位は「判定の流れ」（例: 低→中 の台は翌日上がりやすい、中→高→低 の台は上がりにくい）と日付・曜日で決めています。台番や台ごとの実績は検証で効かなかったので使っていません。</p>{table}{mapsec}{judgesec}{check_section(hist, pred_dir, target)}"
+           f"<p class='note'>{E(factor_note(model))}</p>{table}{mapsec}{judgesec}{check_section(hist, pred_dir, target)}"
            f"{habit}{btsec}{foot}</div></body></html>")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{target:%Y-%m-%d}.html"
