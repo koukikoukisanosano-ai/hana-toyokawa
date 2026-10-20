@@ -32,15 +32,18 @@ def loglik_matrix(df: pd.DataFrame) -> np.ndarray:
         m = models[i]
         if m not in cache:
             sp = spec_for(m)
-            cache[m] = (1.0 / np.array(sp.bb), 1.0 / np.array(sp.rb))
-        pb, pr = cache[m]
+            bbd = np.array([v if v else np.inf for v in sp.bb], dtype=float)
+            rbd = np.array([v if v else np.inf for v in sp.rb], dtype=float)
+            missing = np.array([v is None for v in sp.bb])
+            cache[m] = (1.0 / bbd, 1.0 / rbd, missing)
+        pb, pr, missing = cache[m]
         g = max(games[i], 0.0)
         lam_b, lam_r = g * pb, g * pr
         # Poisson log-likelihood (k*log(lam) - lam), lam=0 のとき寄与0
         with np.errstate(divide="ignore", invalid="ignore"):
             lb = np.where(lam_b > 0, bb[i] * np.log(lam_b) - lam_b, 0.0)
             lr = np.where(lam_r > 0, rb[i] * np.log(lam_r) - lam_r, 0.0)
-        out[i] = lb + lr
+        out[i] = np.where(missing, -1e9, lb + lr)   # その機種に無い設定は選ばれない
     return out
 
 
@@ -102,5 +105,6 @@ def add_estimates(df: pd.DataFrame, prior: np.ndarray | None = None,
 def gassan_to_setting(gassan: float, model: str = "") -> float:
     """合算分母 → 設定（スペック表の間を直線でつなぐ。1〜6の範囲に収める）。"""
     sp = spec_for(model)
-    g = 1.0 / (1.0 / np.array(sp.bb) + 1.0 / np.array(sp.rb))
-    return float(np.interp(-gassan, -g, np.arange(1, N_SET + 1)))
+    idx = [i for i, v in enumerate(sp.bb) if v is not None]
+    g = np.array([1.0 / (1.0 / sp.bb[i] + 1.0 / sp.rb[i]) for i in idx])
+    return float(np.interp(-gassan, -g, np.array(idx, dtype=float) + 1))
