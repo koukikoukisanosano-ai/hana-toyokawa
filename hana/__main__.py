@@ -345,7 +345,8 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     except Exception as e:
         log.warning("環境の記録に失敗: %s", e)
     path = R.build(m, pred, target, cfg["hall"].get("name", ""), cfg["predict"].get("top_n", 10),
-                   load_backtest(root), db.coverage(), root / "output", extra_warns=status_warnings(root),
+                   load_backtest(root), db.coverage(), root / "output",
+                   extra_warns=closed_notes(s, units, target) + status_warnings(root),
                    pred_dir=pred_dir, info_line=status_line(root))
     if cfg.get("storage") == "csv":   # 答え合わせ用に予想を保存
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -356,6 +357,27 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     if open_browser:
         webbrowser.open((root / "output" / "latest.html").resolve().as_uri())
     return path
+
+
+def closed_notes(s, units, target: Date) -> list[str]:
+    """休業日まわりのお知らせ（予想ページの上に出す）。"""
+    out = []
+    closed = set(s.closed_days)
+    t = target.isoformat()
+    if t in closed:
+        out.append(f"本日（{target.month}/{target.day}）は休業日として登録されています。予想は参考表示です。")
+    prev = M.prev_open_day(target, 1, s).date()
+    skipped = [d for d in sorted(closed) if prev.isoformat() < d < t]
+    have = set(units["date"].astype(str)) if len(units) else set()
+    if skipped:
+        names = "・".join(f"{int(d[5:7])}/{int(d[8:10])}" for d in skipped)
+        out.append(f"{names} は休業日のため、{prev.month}/{prev.day} のデータを「前日」として予想しています。")
+    if prev.isoformat() not in have:
+        y = target - timedelta(days=1)
+        if y.isoformat() not in closed:
+            out.append(f"{prev.month}/{prev.day} が休業日だった場合は、config.yaml の closed_days に"
+                       f" {prev.isoformat()} を追加すると、その前の営業日を「前日」として予想します。")
+    return out
 
 
 def status_line(root: Path) -> str:

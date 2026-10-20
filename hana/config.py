@@ -29,4 +29,14 @@ def model_settings(cfg: dict):
         event_digits=tuple(h.get("event_digits", [0, 5])),
         prev_max_gap=int(p.get("prev_max_gap", 1)),
         islands=[list(map(int, x)) for x in islands] if islands else None,
+        closed_days=closed_days(cfg),
     )
+
+
+def closed_days(cfg: dict) -> tuple[str, ...]:
+    """休業日: config.yaml の closed_days ＋ 自動で見つけた休業日（data/closed_days.txt）。"""
+    days = {str(d) for d in (cfg["hall"].get("closed_days") or [])}
+    p = ROOT / "data" / "closed_days.txt"
+    if p.exists():
+        days |= {x.strip() for x in p.read_text(encoding="utf-8").splitlines() if x.strip()}
+    return tuple(sorted(days))

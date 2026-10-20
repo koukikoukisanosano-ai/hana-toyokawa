@@ -49,6 +49,29 @@ class Settings:
     l2: float = 4.0                # 重みを1（素直な足し算）に寄せる強さ
     min_train_days: int = 45       # これ未満のデータ日数なら重み調整をせず素直に足す
     judge_min_games: int = 2000    # これ未満のG数の日は設定を判定しない
+    closed_days: tuple[str, ...] = ()   # 休業日（"2026-10-19" の形）。前日・連続日の数え方で飛ばす
+
+
+def _hol(cfg: "Settings"):
+    return np.array(sorted(cfg.closed_days), dtype="datetime64[D]")
+
+
+def open_gap(a, b, cfg: "Settings"):
+    """日付 a → b が、休業日を飛ばして何営業日離れているか（a が営業日なら前日=1）。"""
+    a = pd.to_datetime(pd.Series(a)).to_numpy().astype("datetime64[D]")
+    b = pd.to_datetime(pd.Series(b)).to_numpy().astype("datetime64[D]")
+    out = np.full(len(a), np.nan)
+    m = ~(np.isnat(a) | np.isnat(b))
+    if m.any():
+        out[m] = np.busday_count(a[m], b[m], weekmask="1111111", holidays=_hol(cfg))
+    return out
+
+
+def prev_open_day(t, k: int, cfg: "Settings") -> pd.Timestamp:
+    """t の k 営業日前（休業日を飛ばす）。"""
+    d = np.busday_offset(np.datetime64(pd.Timestamp(t).date()), -k, roll="backward",
+                         weekmask="1111111", holidays=_hol(cfg))
+    return pd.Timestamp(d)
 
 
 # ---------------------------------------------------------------- 前処理
@@ -123,22 +146,23 @@ def add_prev(df: pd.DataFrame, cfg: Settings) -> pd.DataFrame:
     df = df.sort_values(["unit", "date"]).copy()
     g = df.groupby("unit")
     prev_date = g["date"].shift(1)
-    gap = (df["date"] - prev_date).dt.days
+    gap = pd.Series(open_gap(prev_date, df["date"], cfg), index=df.index)
     ok = gap.notna() & (gap <= cfg.prev_max_gap)
     df["prev_diff"] = np.where(ok, g["diff"].shift(1), np.nan)
     df["prev_p"] = np.where(ok, g["p_high"].shift(1), np.nan)
     low = (df["diff"] <= -500) & (df["p_high"].fillna(0) < 0.15)
     # 直前までの連続凹み日数（連続日のみ）
     streak = np.zeros(len(df), dtype=int)
-    units, dates, lows = df["unit"].to_numpy(), df["date"].to_numpy(), low.to_numpy()
+    units, lows = df["unit"].to_numpy(), low.to_numpy()
+    gaps = gap.to_numpy()
     for i in range(1, len(df)):
-        if units[i] == units[i - 1] and (dates[i] - dates[i - 1]) <= np.timedelta64(cfg.prev_max_gap, "D"):
+        if units[i] == units[i - 1] and gaps[i] <= cfg.prev_max_gap:
             streak[i] = streak[i - 1] + 1 if lows[i - 1] else 0
     df["streak"] = streak
     df["recent_judge"], df["recent_n"] = recent_judge(df, df["unit"].to_numpy(), df["date"].to_numpy())
     st = judge_state(df["judge"])
     for k in (1, 2, 3):
-        okk = (df["date"] - g["date"].shift(k)).dt.days == k
+        okk = pd.Series(open_gap(g["date"].shift(k), df["date"], cfg), index=df.index) == k
         df[f"st{k}"] = np.where(okk, pd.Series(st, index=df.index).groupby(df["unit"]).shift(k), None)
     return df.sort_values(["date", "unit"]).reset_index(drop=True)
 
@@ -375,7 +399,7 @@ def candidates(model: Model, target: Date) -> pd.DataFrame:
     pos = corners(cur["unit"].tolist(), model.cfg.islands)
     # 前回情報
     lastrows = df.sort_values("date").groupby("unit").tail(1).set_index("unit")
-    gap = (t - lastrows["date"]).dt.days
+    gap = pd.Series(open_gap(lastrows["date"], np.full(len(lastrows), t), model.cfg), index=lastrows.index)
     ok = gap <= model.cfg.prev_max_gap
     cur["prev_date"] = cur["unit"].map(lastrows["date"])
     cur["prev_diff"] = cur["unit"].map(lastrows["diff"].where(ok))
@@ -387,10 +411,10 @@ def candidates(model: Model, target: Date) -> pd.DataFrame:
     # 前日のデータがまだ公開されていない朝は、取れている最新日までの流れで代用する
     have = set(df.dropna(subset=["judge"])["date"])
     off = 0
-    while off < 3 and (t - pd.Timedelta(days=1 + off)) not in have:
+    while off < 3 and prev_open_day(t, 1 + off, model.cfg) not in have:
         off += 1
     for k in (1, 2, 3):
-        dk = t - pd.Timedelta(days=k + off)
+        dk = prev_open_day(t, k + off, model.cfg)
         cur[f"st{k}"] = [judge_state([jd.get((u, dk), np.nan)])[0] for u in cur["unit"]]
     cur["recent_judge"], cur["recent_n"] = recent_judge(df, cur["unit"].to_numpy(),
                                                         np.full(len(cur), np.datetime64(t)))

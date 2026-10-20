@@ -263,7 +263,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     info = M.target_day_info(target, cfg)
     hist = model.hist
     last_date = hist["date"].max().date() if len(hist) else None
-    lag = (target - last_date).days if last_date else None
+    lag = int(M.open_gap([last_date], [target], cfg)[0]) if last_date else None   # 休業日を除いた営業日数
     base = model.base_rate
     n_units = len(pred)
     exp_high = float(pred["score"].sum()) if n_units else 0.0
@@ -275,7 +275,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
 
     boxes = [
         (f"{exp_high:.1f}台", f"今日の高設定 期待台数（全{n_units}台・平常{avg_high:.1f}台）"),
-        (f"{last_date:%m/%d}" if last_date else "-", f"データの最新日（{lag}日前）" if lag is not None else "データなし"),
+        (f"{last_date:%m/%d}" if last_date else "-", f"データの最新日（{lag}営業日前）" if lag is not None else "データなし"),
         (f"{model.n_days}日分", "学習に使ったデータ"),
         ("調整済" if model.tuned else "蓄積中", "要因の重み（45日分以上で自動調整）"),
     ]
@@ -290,12 +290,12 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     status = "<div class='status'>" + "".join(f"<div class='box'><b>{E(a)}</b><span>{E(b)}</span></div>" for a, b in boxes) + "</div>"
     warns = []
     if lag is not None and lag > cfg.prev_max_gap:
-        y = target - pd.Timedelta(days=1)
+        y = M.prev_open_day(target, 1, cfg)
         warns.append(f"前日（{y.month}/{y.day}）のデータがまだ取り込めていないため、"
-                     "「前日の凹み・据え置き」系の要因は使わずに予想しています。iPhoneの次の自動取得で取り込まれます。")
+                     "「前日の凹み・据え置き」系の要因は使わずに予想しています。データが届きしだい自動で更新されます。")
     if model.n_days < 120:
         warns.append(f"過去データを集めている途中です（いま{model.n_days}日分／目標 約1年分）。"
-                     "iPhoneが動くたびに増えていき、増えるほど店の癖が予想に反映されます。")
+                     "自動取得のたびに増えていき、増えるほど店の癖が予想に反映されます。")
     from .specs import spec_for
     unver = sorted({m for m in pred.get("model", []) if not spec_for(m).verified})
     if unver:
