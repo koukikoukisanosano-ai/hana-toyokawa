@@ -69,6 +69,14 @@ def parse_tag_page(html: str, base_url: str, today: Date) -> tuple[list[dict], l
     return days, links, last_page
 
 
+def _num(s):
+    """みんレポの数値。「-1.234」のようにピリオドが桁区切りのことがあるので直してから読む。"""
+    t = _nk(str(s or "")).strip().replace("‐", "-").replace("−", "-")
+    if re.fullmatch(r"[+\-]?\d{1,3}(\.\d{3})+", t.replace("枚", "").replace(",", "")):
+        t = t.replace(".", "")
+    return to_int(t)
+
+
 def _nk(s: str) -> str:
     import unicodedata
     return unicodedata.normalize("NFKC", s or "")
@@ -119,7 +127,7 @@ def parse_kishu_page(html: str) -> list[dict]:
         tds = [td.get_text(strip=True) for td in table.find_all("td")]
         if unit is None or len(tds) < 3:
             continue
-        diff, games = to_int(tds[0]), to_int(tds[1])
+        diff, games = _num(tds[0]), _num(tds[1])
         m = re.search(r"1/([\d.]+)", tds[2])
         total = None
         if m and games:
@@ -140,7 +148,7 @@ def parse_unit_page(html: str) -> dict | None:
         head = [c.get_text(strip=True) for c in rows[0].find_all(["th", "td"])]
         vals = [c.get_text(strip=True) for c in rows[1].find_all(["th", "td"])]
         if head[:2] == ["機種", "差枚"] and len(vals) >= 3:
-            res.update(model=vals[0], diff=to_int(vals[1]), games=to_int(vals[2]))
+            res.update(model=vals[0], diff=_num(vals[1]), games=_num(vals[2]), diff_raw=vals[1])
         elif head[:2] == ["BB", "RB"] and len(vals) >= 2:
             res.update(bb=to_int(vals[0]), rb=to_int(vals[1]))
     return res if "bb" in res else None
@@ -247,7 +255,25 @@ class MinRepo:
                 h = self.f.get(f"{url.rstrip('/')}/?num={r['unit']}", referer=url, interval=self.interval)
                 info = parse_unit_page(h)
                 if info:
-                    out.append({**r, "bb": info.get("bb"), "rb": info.get("rb")})
+                    if not getattr(self, "_unit_dumped", False):
+                        self._unit_dumped = True
+                        try:
+                            import json
+                            from pathlib import Path
+                            dp = Path(__file__).resolve().parents[2] / "data" / "debug" / "minrepo_unit.json"
+                            dp.parent.mkdir(parents=True, exist_ok=True)
+                            soup = BeautifulSoup(h, "lxml")
+                            tabs = [[[c.get_text(strip=True) for c in tr.find_all(["th", "td"])] for tr in t.find_all("tr")[:3]]
+                                    for t in soup.find_all("table")[:6]]
+                            dp.write_text(json.dumps({"url": url, "unit": r["unit"], "row": {k: v for k, v in r.items()},
+                                                      "info": info, "tables": tabs}, ensure_ascii=False, indent=1),
+                                          encoding="utf-8")
+                        except Exception as e:
+                            log.warning("調査用の記録に失敗: %s", e)
+                    d2 = info.get("diff")
+                    out.append({**r, "bb": info.get("bb"), "rb": info.get("rb"),
+                                "diff": d2 if d2 is not None and abs(d2) >= abs(r.get("diff") or 0) else r.get("diff"),
+                                "games": info.get("games") or r.get("games")})
             n = self.db.upsert_units(out, "minrepo")
         else:
             out = []
