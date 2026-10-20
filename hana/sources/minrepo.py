@@ -69,12 +69,28 @@ def parse_tag_page(html: str, base_url: str, today: Date) -> tuple[list[dict], l
     return days, links, last_page
 
 
+def _nk(s: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKC", s or "")
+
+
+def debug_dump(html: str, url: str) -> dict:
+    """機種が見つからなかった日別ページの様子（原因調査用）"""
+    soup = BeautifulSoup(html, "lxml")
+    kishu = [(a.get_text(strip=True), a["href"]) for a in soup.find_all("a", href=True) if "kishu" in a["href"]]
+    heads = [[th.get_text(strip=True) for th in t.find_all("th")][:8] for t in soup.find_all("table")][:15]
+    return {"url": url, "len": len(html), "title": soup.title.get_text() if soup.title else "",
+            "kishu_links": kishu[:120], "table_heads": heads,
+            "text": soup.get_text(" ", strip=True)[:3000]}
+
+
 def parse_day_models(html: str, keyword: str) -> tuple[list[str], list[dict]]:
     """日別ページ → (対象機種名リスト, バラエティ行[{unit, model, diff, games}])"""
+    keyword = _nk(keyword)
     soup = BeautifulSoup(html, "lxml")
     models = []
     for a in soup.find_all("a", href=True):
-        if "kishu=" in a["href"] and "kishu=all" not in a["href"] and keyword in a.get_text():
+        if "kishu=" in a["href"] and "kishu=all" not in a["href"] and keyword in _nk(a.get_text()):
             name = a.get_text(strip=True)
             if name not in models:
                 models.append(name)
@@ -84,7 +100,7 @@ def parse_day_models(html: str, keyword: str) -> tuple[list[str], list[dict]]:
         if head[:3] == ["機種", "台番", "差枚"]:
             for tr in table.find_all("tr")[1:]:
                 tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-                if len(tds) >= 4 and keyword in tds[0] and tds[0] not in models:
+                if len(tds) >= 4 and keyword in _nk(tds[0]) and tds[0] not in models:
                     variety.append({"model": tds[0], "unit": to_int(tds[1]), "diff": to_int(tds[2]),
                                     "games": to_int(tds[3])})
     return models, variety
@@ -193,6 +209,16 @@ class MinRepo:
         html = self.f.get(url, referer=self.tag_url, interval=self.interval)
         date = post_date(html, date)
         models, variety = parse_day_models(html, self.kw)
+        if not models and not variety and not getattr(self, "_dumped", False):
+            self._dumped = True
+            try:
+                import json
+                from pathlib import Path
+                dp = Path(__file__).resolve().parents[2] / "data" / "debug" / "minrepo_day.json"
+                dp.parent.mkdir(parents=True, exist_ok=True)
+                dp.write_text(json.dumps(debug_dump(html, url), ensure_ascii=False, indent=1), encoding="utf-8")
+            except Exception as e:
+                log.warning("調査用の記録に失敗: %s", e)
         rows = []
         for model in models:
             kurl = f"{url.rstrip('/')}/?kishu={quote(model)}"
