@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import date as Date
+from datetime import date as Date, timedelta
 from urllib.parse import quote, urljoin
 
 import numpy as np
@@ -154,6 +154,43 @@ def parse_unit_page(html: str) -> dict | None:
     return res if "bb" in res else None
 
 
+def parse_unit_history(html: str, today: Date) -> list[dict]:
+    """台番ページの「日付・差枚・G数・出率・BB・RB…」の表 → [{date, games, bb, rb}]（過去数日分）"""
+    soup = BeautifulSoup(html, "lxml")
+    out = []
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        head = [c.get_text(strip=True) for c in rows[0].find_all(["th", "td"])]
+        if head[:1] != ["日付"] or "BB" not in head or "RB" not in head or "G数" not in head:
+            continue
+        ig, ib, ir = head.index("G数"), head.index("BB"), head.index("RB")
+        for tr in rows[1:]:
+            v = [c.get_text(strip=True) for c in tr.find_all(["th", "td"])]
+            if len(v) <= max(ig, ib, ir):
+                continue
+            m = _MD.search(v[0])
+            if not m:
+                continue
+            y = int(m.group(1)) if m.group(1) else infer_year(int(m.group(2)), int(m.group(3)), m.group(4), today)
+            if not y:
+                continue
+            g, bb, rb = _num(v[ig]), _num(v[ib]), _num(v[ir])
+            if g is None or bb is None or rb is None:
+                continue
+            out.append({"date": f"{y:04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", "games": g, "bb": bb, "rb": rb})
+    return out
+
+
+def est_diff(bb, rb, games, coef=None) -> int | None:
+    """差枚が伏せられているとき（みんレポで ±1 や - と表示）は BB・RB・G数 から見積もる。"""
+    if bb is None or rb is None or games is None:
+        return None
+    a, b, c = coef or DEFAULT_COEF
+    return int(round(a * bb + b * rb + c * games))
+
+
 def post_date(html: str, fallback: str) -> str:
     """日別ページの本当の日付（タイトルの月日 + 投稿日の年）"""
     soup = BeautifulSoup(html, "lxml")
@@ -251,9 +288,20 @@ class MinRepo:
                          "diff": v["diff"], "total": None})
         if precise:
             out = []
+            extra: dict[str, list[dict]] = {}
+            done = self.db.fetched_dates("minrepo")
             for r in rows:
                 h = self.f.get(f"{url.rstrip('/')}/?num={r['unit']}", referer=url, interval=self.interval)
                 info = parse_unit_page(h)
+                try:   # 台番ページには過去数日分も載っているので、まだ取っていない日はここで一緒に取る
+                    for hrow in parse_unit_history(h, Date.fromisoformat(date) + timedelta(days=1)):
+                        if hrow["date"] < date and hrow["date"] not in done:
+                            extra.setdefault(hrow["date"], []).append({
+                                "date": hrow["date"], "unit": r["unit"], "model": r["model"],
+                                "games": hrow["games"], "bb": hrow["bb"], "rb": hrow["rb"],
+                                "diff": est_diff(hrow["bb"], hrow["rb"], hrow["games"])})
+                except Exception as e:
+                    log.debug("過去分の読み取り失敗: %s", e)
                 if info:
                     if not getattr(self, "_unit_dumped", False):
                         self._unit_dumped = True
@@ -263,18 +311,25 @@ class MinRepo:
                             dp = Path(__file__).resolve().parents[2] / "data" / "debug" / "minrepo_unit.json"
                             dp.parent.mkdir(parents=True, exist_ok=True)
                             soup = BeautifulSoup(h, "lxml")
-                            tabs = [[[c.get_text(strip=True) for c in tr.find_all(["th", "td"])] for tr in t.find_all("tr")[:3]]
+                            tabs = [[[c.get_text(strip=True) for c in tr.find_all(["th", "td"])] for tr in t.find_all("tr")[:40]]
                                     for t in soup.find_all("table")[:6]]
                             dp.write_text(json.dumps({"url": url, "unit": r["unit"], "row": {k: v for k, v in r.items()},
                                                       "info": info, "tables": tabs}, ensure_ascii=False, indent=1),
                                           encoding="utf-8")
                         except Exception as e:
                             log.warning("調査用の記録に失敗: %s", e)
+                    games = info.get("games") or r.get("games")
                     d2 = info.get("diff")
-                    out.append({**r, "bb": info.get("bb"), "rb": info.get("rb"),
-                                "diff": d2 if d2 is not None and abs(d2) >= abs(r.get("diff") or 0) else r.get("diff"),
-                                "games": info.get("games") or r.get("games")})
+                    if d2 is None or abs(d2) <= 1:     # 差枚が伏せられている店
+                        d2 = est_diff(info.get("bb"), info.get("rb"), games)
+                    out.append({**r, "bb": info.get("bb"), "rb": info.get("rb"), "diff": d2, "games": games})
             n = self.db.upsert_units(out, "minrepo")
+            # 一緒に取れた過去日: その日の台数がそろっていれば取得済みにする
+            for d, ex in extra.items():
+                if len(ex) >= max(1, int(len(out) * 0.9)):
+                    self.db.upsert_units(ex, "minrepo")
+                    self.db.log_fetch(d, "minrepo", "ok", len(ex))
+                    self.extra_days = getattr(self, "extra_days", []) + [d]
         else:
             out = []
             for r in rows:

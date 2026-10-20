@@ -158,10 +158,15 @@ def cmd_minrepo_sync(cfg, db, root: Path, minutes: float | None = None) -> dict:
         for d, u in todo:
             if time.time() > deadline:
                 break
+            if d in db.fetched_dates("minrepo"):   # 前の日の台ページから一緒に取れた日
+                continue
             try:
                 n = mr.fetch_day(d, u, precise=True)
                 got.append(d)
-                log.info("みんレポ: %s ハナハナ %d台", d, n)
+                more = getattr(mr, "extra_days", [])
+                got += more
+                mr.extra_days = []
+                log.info("みんレポ: %s ハナハナ %d台%s", d, n, f"（ほか過去{len(more)}日分も取得）" if more else "")
             except RateLimited:
                 blocked = True
                 log.warning("みんレポ: アクセス制限。続きは次回")
@@ -169,7 +174,7 @@ def cmd_minrepo_sync(cfg, db, root: Path, minutes: float | None = None) -> dict:
             except Exception as e:
                 log.warning("みんレポ: %s の取得失敗: %s", d, e)
             db.export_csv(root / "data", keyword=cfg["target"].get("keyword", "ハナハナ"))
-        remain = max(0, len(todo) - len(got))
+        remain = len([d for d, _ in todo if d not in db.fetched_dates("minrepo")])
     except RateLimited as e:
         blocked, remain, err = True, None, str(e)
     except Exception as e:
