@@ -1,0 +1,39 @@
+{
+ "ok": true,
+ "active": [
+  "f_digit",
+  "f_wday",
+  "f_special",
+  "f_seq2",
+  "h_digit",
+  "h_wday"
+ ],
+ "unit_factors": [
+  "f_seq2"
+ ],
+ "score": 0.0072,
+ "base_score": -0.0035,
+ "steps": [
+  {
+   "add": "f_seq2",
+   "label": "2日前→前日の判定の流れ",
+   "gain": 0.0108
+  }
+ ],
+ "single": {
+  "f_seq2": 0.0108,
+  "f_seq3": 0.0081,
+  "f_unit": -0.005,
+  "f_udigit": -0.0003,
+  "f_match": -0.0012,
+  "f_corner": 0.0009,
+  "f_prevdiff": 0.0055,
+  "f_prevhigh": 0.007,
+  "f_streak": -0.0007,
+  "f_recent": 0.0085
+ },
+ "test_days": 49,
+ "n_days": 92,
+ "top_k": 5,
+ "when": "2026-10-21"
+}
