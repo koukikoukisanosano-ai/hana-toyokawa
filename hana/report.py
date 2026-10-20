@@ -78,10 +78,12 @@ table.rk td.sparkc{display:none}
 """
 
 
-GOAL_WORD = {"plus": "プラス終了", "high": "高設定っぽい"}
+GOAL_WORD = {"plus": "プラス終了", "rank": "プラス終了", "high": "高設定っぽい"}
 
 
 def goal_title(cfg) -> str:
+    if cfg.goal == "rank":
+        return "差枚順位の予想"
     return "プラス終了の見込み" if cfg.goal == "plus" else f"高設定(設定{cfg.high_min}以上)期待度"
 
 
@@ -309,7 +311,8 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<div class='date'>{target.year}年{target.month}月{target.day}日({info['wday']}){tags}</div></header>")
 
     boxes = [
-        (f"{exp_high:.1f}台", (f"今日のプラス終了 見込み台数（全{n_units}台・平常{avg_high:.1f}台）" if cfg.goal == "plus" else f"今日の高設定 期待台数（全{n_units}台・平常{avg_high:.1f}台）")),
+        (f"{n_units}台" if cfg.goal == "rank" else f"{exp_high:.1f}台", (f"今日のプラス終了 見込み台数（全{n_units}台・平常{avg_high:.1f}台）" if cfg.goal == "plus" else
+         f"予想の対象台数（差枚順位の予想）" if cfg.goal == "rank" else f"今日の高設定 期待台数（全{n_units}台・平常{avg_high:.1f}台）")),
         (f"{last_date:%m/%d}" if last_date else "-", f"データの最新日（{lag}営業日前）" if lag is not None else "データなし"),
         (f"{model.n_days}日分", "学習に使ったデータ"),
         ("調整済" if model.tuned else "蓄積中", "要因の重み（45日分以上で自動調整）"),
@@ -365,16 +368,25 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<td class='unit'>{u}</td>"
             f"<td class='score'><div class='pct'><span class='mark'>{mark}</span> {rel:.0f}<small>点</small></div>"
             f"<div class='bar'><i style='width:{max(rel, 3):.0f}%'></i></div>"
-            f"<div class='ratio'>見込み {p*100:.1f}%・平常の×{ratio:.2f}</div></td><td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
+            + (f"<div class='ratio'>同じ条件の台の過去平均：差枚順位 上位{(1 - p) * 100:.0f}%</div></td>"
+               if cfg.goal == "rank" else f"<div class='ratio'>見込み {p*100:.1f}%・平常の×{ratio:.2f}</div></td>")
+            + f"<td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
             f"<td class='prevc'>{prev}</td><td class='sparkc'>{sp}</td></tr>")
     colname = "今日の中での評価"
     spread = (float(pred["score"].max()) - float(pred["score"].min())) * 100 if len(pred) else 0
-    word = "プラス終了の見込み" if cfg.goal == "plus" else "高設定の見込み"
-    rank_note = (f"<p class='note'>点数は、今日の{len(pred)}台の中での位置（一番上＝100点・一番下＝0点）です。"
-                 f"実際の{word}は1位と最下位で{spread:.1f}ポイントしか違いません"
-                 f"（{float(pred['score'].min())*100:.1f}%〜{float(pred['score'].max())*100:.1f}%）。"
-                 "過去データで差が小さいと出ているためで、無理に差を広げると検証の成績が悪くなりました。"
-                 "順位の参考としてご覧ください。</p>")
+    if cfg.goal == "rank":
+        rho = (bt or {}).get("rho")
+        rank_note = (f"<p class='note'>全{len(pred)}台を、今日の差枚が多くなりそうな順に並べています（点数は1位＝100点・最下位＝0点）。"
+                     + (f"過去{bt['days']}日で検証した、予想の順位と実際の差枚順位の一致度は {rho:+.3f}"
+                        f"（1＝完全一致・0＝無関係／一致度がプラスだった日 {bt['rho_pos']*100:.0f}%）。" if rho is not None else "")
+                     + "</p>")
+    else:
+        word = "プラス終了の見込み" if cfg.goal == "plus" else "高設定の見込み"
+        rank_note = (f"<p class='note'>点数は、今日の{len(pred)}台の中での位置（一番上＝100点・一番下＝0点）です。"
+                     f"実際の{word}は1位と最下位で{spread:.1f}ポイントしか違いません"
+                     f"（{float(pred['score'].min())*100:.1f}%〜{float(pred['score'].max())*100:.1f}%）。"
+                     "過去データで差が小さいと出ているためで、無理に差を広げると検証の成績が悪くなりました。"
+                     "順位の参考としてご覧ください。</p>")
     table = rank_note + (f"<table class='rk'><tr class='hd'><th>順位</th><th>台番</th><th>{colname}</th><th>主な根拠</th><th>前回データ</th>"
              "<th>直近の判定設定</th></tr>" + "".join(trs) + "</table>")
     judgesec = judge_grid(hist, pred["unit"].astype(int).tolist(), cfg)
@@ -426,7 +438,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             parts.append(f"<div><h3 style='font-size:15px;margin:6px 0'>店全体（全機種）の平均差枚・日付末尾別</h3>"
                          f"<table class='mini'><tr><th>日付</th><th>平均差枚/台</th><th>日数</th></tr>{rows}</table>"
                          f"<p class='note'>{span[0]}〜{span[1]}（{span[2]}日）</p></div>")
-        rate_def = (f"率 = {cfg.label_min_games:,}G以上回った台のうち、差枚プラスで終わった台の割合"
+        rate_def = (f"率 = {cfg.label_min_games:,}G以上回った台の、その日の差枚順位の平均（上位＝100%・下位＝0%）"
+                    if cfg.goal == "rank" else
+                    f"率 = {cfg.label_min_games:,}G以上回った台のうち、差枚プラスで終わった台の割合"
                     if cfg.goal == "plus" else
                     f"率 = その日の合算で「設定{cfg.high_min}以上」と判定された台の割合")
         habit = (f"<h2>学習した店の癖</h2><p class='note'>{rate_def}"
@@ -437,7 +451,10 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     btsec = "<h2>過去データでの検証</h2>"
     if bt and bt.get("ok"):
         btsec += (f"<div class='status'>"
-                  + (f"<div class='box'><b>{bt['top_y']*100:.1f}%</b><span>予想上位{bt['top_k']}台のプラス終了率"
+                  + (f"<div class='box'><b>{bt['rho']:+.3f}</b><span>全台の予想順位と実際の差枚順位の一致度（順位相関・1が完全一致）"
+                     f"／プラスだった日 {bt['rho_pos']*100:.0f}%</span></div>"
+                     if cfg.goal == "rank" and "rho" in bt else
+                     f"<div class='box'><b>{bt['top_y']*100:.1f}%</b><span>予想上位{bt['top_k']}台のプラス終了率"
                      f"（全台 {bt['all_y']*100:.1f}%）</span></div>"
                      if cfg.goal == "plus" and "top_y" in bt else
                      f"<div class='box'><b>{bt['hit']*100:.1f}%</b><span>上位{bt['top_k']}台予想が、その日の推定上位{bt['top_k']}台に入った率"

@@ -15,7 +15,7 @@ hall:
 
 target:
   keyword: ハナハナ         # 機種名にこの文字を含む台が対象
-  goal: plus                # 予想の狙い: plus=差枚プラスで終わりやすい台 / high=高設定(high_min以上)の台
+  goal: rank                # 予想の狙い: rank=全台を差枚で並べた順位に一番近くなるように / plus=差枚プラス / high=高設定
   train_min_games: 1000     # これ以上回った台を学習・検証に使う
   high_min: 4               # goal: high のときに「高設定」とみなす設定
   judge_min_games: 2000     # これ未満のG数の日は設定を判定しない（判定設定の表示用）

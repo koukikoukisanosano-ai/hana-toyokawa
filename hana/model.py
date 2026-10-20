@@ -77,7 +77,7 @@ class Settings:
     keyword: str = "ハナハナ"
     high_min: int = 5
     label_min_games: int = 1000   # 学習・検証に使うG数の下限
-    goal: str = "plus"             # 予想の狙い: plus=差枚プラスで終わる台 / high=高設定(high_min以上)の台
+    goal: str = "rank"             # 予想の狙い: rank=その日の全台の差枚順位 / plus=差枚プラス / high=高設定
     event_digits: tuple[int, ...] = (0, 5)
     prev_max_gap: int = 1          # 「前回」として使うのは何日前まで（1=前日のみ）
     islands: list[list[int]] | None = None   # [[開始, 終了], ...] 未指定なら連番の塊を島とみなす
@@ -124,7 +124,13 @@ def prepare(units: pd.DataFrame, cfg: Settings) -> tuple[pd.DataFrame, np.ndarra
     df, prior = add_estimates(df, high_min=cfg.high_min, min_games=300, judge_min_games=cfg.judge_min_games)
     # 答え（goal=plus）: その日 差枚プラスで終わったか。goal=high: 合算で「設定{high_min}以上」と判定されたか。
     # G数が label_min_games 未満の日は学習に使わない。
-    if cfg.goal == "plus":
+    if cfg.goal == "rank":
+        # 答え = その日の対象台の中での差枚の順位（一番多い台=1・一番少ない台=0）
+        ok = (df["games"] >= cfg.label_min_games) & df["diff"].notna()
+        r = df["diff"].where(ok).groupby(df["date"]).rank(method="average")
+        n = ok.groupby(df["date"]).transform("sum")
+        df["y"] = ((r - 0.5) / n).where(ok, 0.0).fillna(0.0)
+    elif cfg.goal == "plus":
         ok = (df["games"] >= cfg.label_min_games) & df["diff"].notna()
         df["y"] = (df["diff"] > 0).astype(float).where(ok, 0.0)
     else:
@@ -599,7 +605,7 @@ def reasons(row: pd.Series, model: Model, top: int = 4, min_effect: float = 0.06
             if c == "f_prevdiff" and pd.notna(row.get("prev_diff")):
                 label += f"({int(row['prev_diff']):+,}枚)"
             text = f"{label} ×{h['ratio']:.2f}"
-            word = "プラス終了率" if model.cfg.goal == "plus" else "高設定率"
+            word = {"plus": "プラス終了率", "rank": "差枚順位の平均"}.get(model.cfg.goal, "高設定率")
             detail = f"{h['label']}: {word} {h['rate']*100:.1f}%（平常 {s['base']*100:.1f}%）・{int(h['days'])}日分"
         elif c in ("h_digit", "h_wday"):
             tab = s.get("hall_digit" if c == "h_digit" else "hall_wday")

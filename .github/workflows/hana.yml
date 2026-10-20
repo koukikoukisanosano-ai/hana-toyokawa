@@ -4,33 +4,30 @@ on:
   schedule:
     - cron: '46 22 * * *'    # 毎朝 7:46（日本時間）: 今日の予想ページを作成
     - cron: '7,37 * * * *'   # 30分ごと: みんレポから未取得の日を取得して予想を更新
-  issue_comment:
-    types: [created]                         # iPhoneからデータが届いたとき
   push:
     branches: [main]
-    paths: ['inbox/**', 'hana/**', 'config.yaml', 'requirements.txt', '.github/workflows/**']
+    paths: ['hana/**', 'config.yaml', 'requirements.txt', '.github/workflows/hana.yml']
   workflow_dispatch:
     inputs:
       mode:
-        description: 'inbox=みんレポ取得と予想 / daily=朝の処理 / diag=接続診断'
+        description: 'page=ページだけすぐ作り直す / inbox=みんレポ取得と予想 / daily=朝の処理 / diag=接続診断'
         type: choice
-        options: [inbox, daily, diag]
-        default: inbox
+        options: [page, inbox, daily, diag]
+        default: page
 
 permissions:
   contents: write
-  issues: write
   pages: write
   id-token: write
 
+# 取得（時間がかかる）とページの作り直し（すぐ終わる）は別の列に並べる。
+# 設定やプログラムを変えたときは、取得の実行を待たずにページだけすぐ作り直す。
 concurrency:
-  group: hana-toyokawa
+  group: hana-toyokawa-${{ (github.event_name == 'push' || inputs.mode == 'page') && 'page' || 'fetch' }}
   cancel-in-progress: false
 
 jobs:
   run:
-    # コメントで起動したときは、持ち主のコメントだけ処理する
-    if: github.event_name != 'issue_comment' || github.event.comment.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -40,33 +37,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main          # 起動時点ではなく最新のデータから始める（続けて届いたときの取りこぼし防止）
+          ref: main          # 起動時点ではなく最新のデータから始める
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
 
-      - name: 準備
-        run: |
-          pip install -r requirements.txt playwright
-          python -m playwright install --with-deps chromium
-
-      - name: 受信データの処理と予想
+      - name: 実行モードを決める
+        id: mode
         run: |
           MODE="${{ inputs.mode }}"
+          if [ "${{ github.event_name }}" = "push" ]; then MODE=page; fi
           if [ -z "$MODE" ]; then
             case "${{ github.event.schedule }}" in
               "46 22 * * *") MODE=daily ;;
               *) MODE=inbox ;;
             esac
           fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "実行モード: $MODE"
-          if [ "$MODE" = "diag" ]; then
+
+      - name: 準備
+        run: |
+          pip install -r requirements.txt
+          if [ "${{ steps.mode.outputs.mode }}" != "page" ]; then
             pip install playwright && python -m playwright install --with-deps chromium
-            python -m hana diag || true
-            MODE=inbox
           fi
+
+      - name: 取得と予想
+        run: |
+          MODE="${{ steps.mode.outputs.mode }}"
+          if [ "$MODE" = "diag" ]; then python -m hana diag || true; MODE=inbox; fi
           python -m hana $MODE
           python -m hana status
 
@@ -75,30 +77,43 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A data inbox 2>/dev/null || git add -A data
-          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
-          git commit -q -m "データ更新 $(date '+%Y-%m-%d %H:%M')"
-          for i in 1 2 3 4; do
-            git pull -q --rebase -X theirs && git push -q && break
-            git rebase --abort 2>/dev/null || true
-            sleep 5
-          done
+          git add -A data
+          if git diff --cached --quiet; then echo "変更なし"; else
+            git commit -q -m "データ更新 $(date '+%Y-%m-%d %H:%M')"
+            for i in 1 2 3 4; do
+              git pull -q --rebase -X theirs && git push -q && break
+              git rebase --abort 2>/dev/null || true
+              sleep 5
+            done
+          fi
+
+      - name: 最新のプログラムでページを作り直す
+        if: always() && steps.mode.outputs.mode != 'page'
+        run: |
+          # 取得の途中でプログラムや設定が変わっていても、公開するページは最新の版で作る
+          git pull -q --rebase -X theirs || true
+          python -m hana predict
 
       - name: ログを保存
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: log
+          name: log-${{ github.run_id }}
           path: logs/
           retention-days: 7
 
       - uses: actions/upload-pages-artifact@v3
+        if: always()
         with:
           path: output
 
   deploy:
     needs: run
+    if: always() && needs.run.result != 'cancelled'
     runs-on: ubuntu-latest
+    concurrency:
+      group: hana-toyokawa-deploy
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

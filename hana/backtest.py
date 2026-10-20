@@ -35,8 +35,9 @@ def _evaluate(rows, X, cols, cfg, test_dates, lag, top_k, refit_every, first) ->
         dd = dd.sort_values(["score", "_r"], ascending=False)
         top = dd.head(top_k)
         best = set(dd.sort_values("e_set", ascending=False).head(top_k)["unit"])
+        rho = float(dd["score"].rank().corr(dd["diff"].rank())) if dd["score"].nunique() > 1 else 0.0
         per_day.append({
-            "date": d.date(),
+            "date": d.date(), "rho": rho,
             "n": len(dd),
             "top_p": top["p_high"].mean(), "all_p": dd["p_high"].mean(),
             "top_y": top["y"].mean(), "all_y": dd["y"].mean(),
@@ -62,7 +63,7 @@ def _prep(units, hall, cfg, lag):
 
 
 def select_factors(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, days: int = 90, lag: int = 1,
-                   top_k: int = 5, refit_every: int = 7, min_gain: float = 0.004, max_factors: int = 8) -> dict:
+                   top_k: int = 5, refit_every: int = 7, min_gain: float = 0.002, max_factors: int = 8) -> dict:
     """この店のデータで、どの要因を使うと予想が良くなるかを検証して選ぶ（前向き選択）。
 
     評価: 各日を「その日より前のデータだけ」で予想し、上位 top_k 台の高設定確率の平均（全台平均との差）。
@@ -91,8 +92,12 @@ def select_factors(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, day
             return (float("nan"),) * 3
         t = pd.DataFrame(pd_)
         # plus: 上位の台のプラス終了率（全台との差）＋平均差枚（1000枚=1として）の両方で採点
-        v = ((t["top_y"] - t["all_y"]) + (t["top_diff"] - t["all_diff"]) / 1000.0).to_numpy() \
-            if cfg.goal == "plus" else (t["top_p"] - t["all_p"]).to_numpy()
+        if cfg.goal == "rank":     # 全台の予想順位と、実際の差枚順位の一致度（順位相関）
+            v = t["rho"].fillna(0.0).to_numpy()
+        elif cfg.goal == "plus":
+            v = ((t["top_y"] - t["all_y"]) + (t["top_diff"] - t["all_diff"]) / 1000.0).to_numpy()
+        else:
+            v = (t["top_p"] - t["all_p"]).to_numpy()
         return float(v.mean()), float(v[0::2].mean()), float(v[1::2].mean())
 
     chosen: list[str] = []
@@ -142,6 +147,7 @@ def run(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, days: int = 60
         "top_e": t["top_e"].mean(), "all_e": t["all_e"].mean(),
         "top_p": t["top_p"].mean(), "all_p": t["all_p"].mean(),
         "top_y": t["top_y"].mean(), "all_y": t["all_y"].mean(),
+        "rho": float(t["rho"].mean()), "rho_pos": float((t["rho"] > 0).mean()),
         "top_diff": t["top_diff"].mean(), "all_diff": t["all_diff"].mean(),
         "hit": t["hit"].mean(), "rand_hit": t["rand_hit"].mean(),
         "win_days": float((t["top_diff"] > t["all_diff"]).mean()),

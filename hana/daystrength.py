@@ -14,7 +14,7 @@ WEEKDAY = "月火水木金土日"
 
 def _day_table(hist: pd.DataFrame, high_min: int, goal: str = "plus") -> pd.DataFrame:
     h = hist[hist["games"] >= 1000].dropna(subset=["diff"])
-    hi = (h["diff"] > 0) if goal == "plus" else (h["judge"] >= high_min)
+    hi = (h["diff"] > 0) if goal in ("plus", "rank") else (h["judge"] >= high_min)
     t = h.assign(hi=hi.astype(float), plus=(h["diff"] > 0).astype(float)) \
          .groupby("date").agg(hi=("hi", "mean"), diff=("diff", "mean"), plus=("plus", "mean"), n=("hi", "size")).reset_index()
     t = t[t["n"] >= 15]

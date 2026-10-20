@@ -270,7 +270,7 @@ def load_backtest(root: Path) -> dict | None:
 
 def need_backtest(root: Path) -> bool:
     bt = load_backtest(root)
-    if bt is None or not bt.get("ok"):
+    if bt is None or not bt.get("ok") or bt.get("goal") != C.model_settings(C.load()).goal:
         return True
     return today_jst().weekday() == 0 and bt.get("when") != str(today_jst())
 
@@ -292,8 +292,8 @@ def need_selection(root: Path, n_days: int) -> bool:
         f = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return True
-    if not f.get("ok"):
-        return True
+    if not f.get("ok") or f.get("goal") != C.model_settings(C.load()).goal:
+        return True       # 予想の狙い（goal）を変えたら選び直す
     when = Date.fromisoformat(f.get("when", "2000-01-01"))
     # 週1回、またはデータが2割以上増えたら選び直す
     return (today_jst() - when).days >= 7 or n_days >= int(f.get("n_days", 0) * 1.2) + 1
@@ -306,6 +306,7 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
         return None
     res = BT.select_factors(units, hall, C.model_settings(cfg))
     res["when"] = str(today_jst())
+    res["goal"] = C.model_settings(cfg).goal
     (root / "data" / "factors.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     if res.get("ok"):
         log.info("この店で使う要因を選び直しました: %s", " / ".join(s["label"] for s in res["steps"]) or "なし")
@@ -353,6 +354,7 @@ def cmd_backtest(cfg, db, root: Path, days=90, lag=None) -> dict:
         return v
     out = {k: plain(v) for k, v in res.items() if k != "table"}
     out["when"] = f"{datetime.now():%Y-%m-%d}"
+    out["goal"] = C.model_settings(cfg).goal
     (root / "data").mkdir(exist_ok=True)
     (root / "data" / "backtest.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     if "table" in res:
@@ -589,6 +591,7 @@ def main(argv=None) -> int:
     p.add_argument("--hours", type=float)
     sub.add_parser("status")
     sub.add_parser("select")
+    sub.add_parser("page")
     sub.add_parser("import-seed")
     sub.add_parser("diag")
     sub.add_parser("inbox")
@@ -667,6 +670,10 @@ def main(argv=None) -> int:
         n = mr.backfill_history(today_jst(), before=first, since=since, coef=coef,
                                 deadline=time.time() + hours * 3600)
         log.info("みんレポ過去分 %d 台日を保存", n)
+    elif a.cmd == "page":
+        # 取得はせず、いまのデータと最新のプログラムでページだけ作り直す（設定やプログラムを変えたとき用）
+        run_checks(cfg, db, root)
+        cmd_predict(cfg, db, root, today_jst())
     elif a.cmd == "select":
         r = cmd_select(cfg, db, root, force=True)
         log.info("選択結果: %s", json.dumps({k: v for k, v in (r or {}).items() if k != "single"}, ensure_ascii=False))
