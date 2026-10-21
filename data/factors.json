@@ -13,35 +13,35 @@
   "f_unit",
   "f_streak"
  ],
- "score": 0.0311,
+ "score": 0.0338,
  "base_score": 0.0,
  "steps": [
   {
    "add": "f_unit",
    "label": "台ごとの入りやすさ",
-   "gain": 0.0248
+   "gain": 0.027
   },
   {
    "add": "f_streak",
    "label": "連続凹み日数",
-   "gain": 0.0063
+   "gain": 0.0068
   }
  ],
  "single": {
-  "f_seq2": -0.0037,
-  "f_seq3": 0.0088,
-  "f_unit": 0.0248,
-  "f_udigit": 0.0018,
-  "f_match": 0.0058,
-  "f_corner": 0.0083,
-  "f_prevdiff": 0.0089,
-  "f_prevhigh": 0.01,
-  "f_streak": 0.0117,
-  "f_recent": -0.0206,
-  "f_busy": 0.0169
+  "f_seq2": -0.0123,
+  "f_seq3": 0.0054,
+  "f_unit": 0.027,
+  "f_udigit": 0.0074,
+  "f_match": 0.0098,
+  "f_corner": -0.0081,
+  "f_prevdiff": 0.0102,
+  "f_prevhigh": 0.0059,
+  "f_streak": 0.0252,
+  "f_recent": -0.0208,
+  "f_busy": 0.0065
  },
  "test_days": 90,
- "n_days": 273,
+ "n_days": 341,
  "top_k": 5,
  "when": "2026-10-21",
  "goal": "rank"
