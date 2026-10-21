@@ -223,25 +223,26 @@ def check_section(hist: pd.DataFrame, pred_dir: Path | None, target: Date, top_k
 def day_section(hist, target, cfg) -> str:
     from . import daystrength as DS
     try:
-        r = DS.estimate(hist, target, cfg.event_digits, cfg.high_min, goal=cfg.goal)
+        r = DS.estimate(hist, target, cfg.event_digits)
     except Exception:
         return ""
     if not r:
         return ""
     t = r["today"]
-    lv, cls = DS.level(t["ratio"])
-    wd = DS.WEEKDAY[target.weekday()]
-    digs = "・".join(str(d) for d in cfg.event_digits)
-    gname = f"{digs}のつく日（旧イベ日）" if t["group"] == "旧イベ日" else f"{digs}のつかない日"
-    sub = (f"{gname}の過去{t['g_days']}日：全台平均 {t['g_diff']:+,.0f}枚・プラス台 {t['g_plus']*100:.0f}%"
-           f"（全日平均 {r['base']*100:.0f}%）")
+    lv, cls = DS.level(t["delta"])
     week = "".join(
-        f"<div class='{DS.level(a['ratio'])[1]}'>{a['date'].month}/{a['date'].day}<br>{DS.WEEKDAY[a['date'].weekday()]}<br>"
-        f"<b>{DS.level(a['ratio'])[0]}</b></div>" for a in r["ahead"])
+        f"<div class='{DS.level(a['delta'])[1]}'>{a['date'].month}/{a['date'].day}<br>{DS.WEEKDAY[a['date'].weekday()]}<br>"
+        f"<b>{DS.level(a['delta'])[0]}</b><br><small>{a['pay']:.1f}%</small></div>" for a in r["ahead"])
+    rows = "".join(f"<tr><td>{E(x['cat'])}</td><td class='num'>{x['pay']:.2f}%</td><td class='num'>{x['exp8000']:+,.0f}枚</td>"
+                   f"<td class='num'>{x['n']}日</td></tr>" for x in r["table"])
     return (f"<h2>今日の店の強さ</h2><div class='dstr {cls}'><b class='lv'>{lv}</b>"
-            f"{GOAL_WORD[cfg.goal]}の台の見込み {t['rate']*100:.0f}%（平常の×{t['ratio']:.2f}）・{wd}曜"
-            f"<div class='sub'>{E(sub)}</div><div class='week'>{week}</div>"
-            f"<div class='sub'>旧イベ日かどうかと曜日ごとの、過去{r['n_days']}日分の集計からの見積もりです。</div></div>")
+            f"今日（{E(t['why'])}・{E(t['cat'])}）のハナハナ全体の見込み出率 {t['pay']:.2f}%"
+            f"（全日平均 {r['base']:.2f}%・1台8000G打った場合の期待差枚 {t['exp8000']:+,.0f}枚）"
+            f"<div class='week'>{week}</div>"
+            f"<div class='sub'>この店のハナハナは「台の選び方」より「行く日」で差が出ています。混む日（土日・祝日・GW・お盆・年末年始）は"
+            f"出率が下がり、ただし混む日でも0・5のつく日は下がりません。平日では火曜がやや高め。"
+            f"2025年の傾向で2026年の各日も当たることを確認済みです（過去{r['n_days']}日から毎回計算し直し）。</div>"
+            f"<table class='mini'><tr><th>日の種類</th><th>出率</th><th>8000Gの期待差枚</th><th>日数</th></tr>{rows}</table></div>")
 
 
 def judge_txt(r) -> str:

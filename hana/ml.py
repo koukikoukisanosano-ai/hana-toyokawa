@@ -138,6 +138,10 @@ def build_frame(units: pd.DataFrame, cfg: M.Settings, target: pd.Timestamp | Non
     df["mend"] = (dd.day >= 28).astype(int)
     gapd = df["date"].map(dict(zip(sorted(days), np.r_[1, np.diff(np.array(sorted(days), dtype="datetime64[D]")).astype(int)])))
     df["after_closed"] = (gapd > 1).astype(int)
+    from .calendar_jp import is_busy, is_holiday
+    dmap = {d: (int(is_busy(pd.Timestamp(d).date())), int(is_holiday(pd.Timestamp(d).date()))) for d in df["date"].unique()}
+    df["busy"] = df["date"].map(lambda d: dmap[d][0])
+    df["holiday"] = df["date"].map(lambda d: dmap[d][1])
     hall_prev = hall.shift(1)
     df["hall_prev"] = df["date"].map(hall_prev)
     return df.sort_values(["di", "unit"]).reset_index(drop=True)
@@ -147,7 +151,7 @@ FEATURES = (["diff_l1", "diff_l2", "diff_l3", "games_l1", "games_l2", "y_l1", "y
              "diff_m7", "diff_m30", "y_m7", "y_m30", "games_m7", "games_m30", "e_set_m7", "e_set_m30",
              "plus_m7", "plus_m30", "y_all", "streak_low", "since_plus",
              "unit", "udigit", "edge", "model_c",
-             "wday", "ddigit", "event", "zoro", "mstart", "mend", "after_closed", "hall_prev"])
+             "wday", "ddigit", "event", "zoro", "mstart", "mend", "after_closed", "hall_prev", "busy", "holiday"])
 
 
 # ---------------------------------------------------------------- 方法ごとの予想

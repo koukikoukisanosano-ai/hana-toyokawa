@@ -9,7 +9,7 @@ hall:
   anaslo_list_url: https://ana-slo.com/ホールデータ/愛知県/ベガス豊川店-データ一覧/
   anaslo_day_url: https://ana-slo.com/{date}-%e3%83%99%e3%82%ac%e3%82%b9%e8%b1%8a%e5%b7%9d%e5%ba%97-data/
   minrepo_tag_url: https://min-repo.com/tag/%E3%83%99%E3%82%AC%E3%82%B9%E8%B1%8A%E5%B7%9D%E5%BA%97/
-  event_digits: [5]        # 旧イベント日（日付の末尾）。5のつく日
+  event_digits: [0, 5]     # 旧イベント日（日付の末尾）。データで0のつく日も強かったので0・5
   # 休業日（入替前日の休みなど）。ここに入れた日は「前日」を数えるときに飛ばします。例: closed_days: [2026-10-19]
   closed_days: [2026-10-19]   # 新台入替の前日で休業
 
