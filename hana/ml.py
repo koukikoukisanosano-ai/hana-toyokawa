@@ -29,7 +29,17 @@ from . import model as M
 
 log = logging.getLogger("hana.ml")
 METHODS = ["prev_rank", "prev_rank_rev", "unit_mean", "factor", "ridge", "gbm", "ensemble"]
+# 予想する中身（どれが一番当たるかを比べる）: 列名 → (表示名, 2値か)
+TARGETS = {
+    "t_rank": ("差枚の順位", False),
+    "t_diff": ("差枚の枚数", False),
+    "t_plus": ("プラスで終わるか", True),
+    "t_payout": ("出率（差枚÷投入枚数）", False),
+    "t_eset": ("推定設定（高設定っぽさ）", False),
+}
+T_METHODS = ["prev", "unit_mean", "ridge", "gbm", "ensemble"]
 LABEL = {
+    "prev": "前日の値そのまま", 
     "benchmark_zero": "何もしない（基準）", "prev_rank": "前日の差枚順位そのまま", "prev_rank_rev": "前日の差枚順位の逆",
     "unit_mean": "台ごとのこれまでの平均順位", "factor": "店の癖の掛け算（これまでの方法）",
     "ridge": "全特徴の重み付き足し算（リッジ回帰）", "gbm": "勾配ブースティング木（機械学習）", "ensemble": "リッジと機械学習の平均",
@@ -65,6 +75,12 @@ def build_frame(units: pd.DataFrame, cfg: M.Settings, target: pd.Timestamp | Non
     r = df["diff"].where(ok).groupby(df["date"]).rank(method="average")
     n = ok.groupby(df["date"]).transform("sum")
     df["y"] = ((r - 0.5) / n).where(ok)
+    g2 = df["games"] >= cfg.judge_min_games
+    df["t_rank"] = df["y"]
+    df["t_diff"] = df["diff"].where(ok)
+    df["t_plus"] = (df["diff"] > 0).astype(float).where(ok)
+    df["t_payout"] = (df["diff"] / (3 * df["games"].clip(lower=1))).where(g2)
+    df["t_eset"] = df["e_set"].where(g2)
     df["rate_reg"] = df["rb"] / df["games"].clip(lower=1) * 1000
     df["plus"] = (df["diff"] > 0).astype(float)
     hall = df[ok].groupby("date")["diff"].mean().rename("hall_diff")
@@ -91,6 +107,10 @@ def build_frame(units: pd.DataFrame, cfg: M.Settings, target: pd.Timestamp | Non
         for c in ("diff", "y", "games", "e_set", "plus"):
             df[f"{c}_m{w}"] = g[c].transform(lambda s: s.shift(1).rolling(w, min_periods=max(3, w // 4)).mean())
     df["y_all"] = g["y"].transform(lambda s: s.shift(1).expanding(min_periods=10).mean())
+    same1 = (df["di"] - g["di"].shift(1)) == 1
+    for t in TARGETS:
+        df[t + "_l1"] = g[t].shift(1).where(same1)
+        df[t + "_all"] = g[t].transform(lambda s: s.shift(1).expanding(min_periods=10).mean())
     df["streak_low"] = np.concatenate([_streak((gg["diff"] <= -500).to_numpy()) for _, gg in g])
     df["since_plus"] = np.concatenate([_since((gg["diff"] > 0).to_numpy()) for _, gg in g])
 
@@ -131,7 +151,21 @@ FEATURES = (["diff_l1", "diff_l2", "diff_l3", "games_l1", "games_l2", "y_l1", "y
 
 
 # ---------------------------------------------------------------- 方法ごとの予想
-def _fit_predict(method: str, tr: pd.DataFrame, te: pd.DataFrame) -> np.ndarray:
+def _fit_predict(method: str, tr: pd.DataFrame, te: pd.DataFrame, target: str | None = None) -> np.ndarray:
+    if target is not None:      # 指定の中身（t_*）を答えにして学習
+        if method in ("ridge", "gbm"):
+            return _fit_model(method, tr, target)(te)
+        if method == "prev":
+            v = te[target + "_l1"]
+            return v.fillna(v.mean() if v.notna().any() else 0).to_numpy()
+        if method == "unit_mean":
+            v = te[target + "_all"]
+            return v.fillna(v.mean() if v.notna().any() else 0).to_numpy()
+        tr = tr[tr[target].notna()].assign(y=lambda d: d[target])
+        if method == "ensemble":
+            a, b = _fit_predict("ridge", tr, te), _fit_predict("gbm", tr, te)
+            return (pd.Series(a).rank().to_numpy() + pd.Series(b).rank().to_numpy()) / 2 / len(a)
+        return _fit_predict(method, tr, te)
     if method == "prev_rank":
         return te["y_l1"].fillna(0.5).to_numpy()
     if method == "prev_rank_rev":
@@ -237,6 +271,97 @@ def compare(units: pd.DataFrame, hall: pd.DataFrame, cfg: M.Settings, test_days:
     good = {m: v for m, v in summary.items() if v["rho_first"] > 0 and v["rho_second"] > 0}
     best = max(good, key=lambda m: good[m]["rho"]) if good else "benchmark_zero"
     return {"ok": True, "best": best, "summary": summary, "test_days": len(tdays), "n_days": len(days)}
+
+
+def _concord(s: np.ndarray, y: np.ndarray, binary: bool) -> float:
+    """2台を比べて、予想で上にした方が実際にも上だった割合（0.5＝コイン投げ）。2値のときはAUC。"""
+    from scipy.stats import kendalltau
+    if np.nanstd(s) == 0:
+        return 0.5
+    if binary:
+        if y.min() == y.max():
+            return np.nan
+        from sklearn.metrics import roc_auc_score
+        return float(roc_auc_score(y, s))
+    tau = kendalltau(s, y).correlation
+    return 0.5 if np.isnan(tau) else (tau + 1) / 2
+
+
+def _fit_model(method: str, tr: pd.DataFrame, target: str):
+    """ridge / gbm を学習して、予想する関数を返す（検証では14日ごとに1回だけ学習する）。"""
+    tr = tr[tr[target].notna()]
+    X, y = tr[FEATURES], tr[target].to_numpy()
+    if method == "gbm":
+        from sklearn.ensemble import HistGradientBoostingRegressor
+        m = HistGradientBoostingRegressor(max_iter=150, learning_rate=0.03, max_depth=3, min_samples_leaf=200,
+                                          l2_regularization=1.0, random_state=0).fit(X, y)
+        return lambda te: m.predict(te[FEATURES])
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    cats = ["wday", "ddigit", "udigit", "model_c"]
+    Xt = pd.get_dummies(X.astype({c: "category" for c in cats}), columns=cats)
+    cols = Xt.columns
+    m = make_pipeline(SimpleImputer(), StandardScaler(), Ridge(alpha=300.0)).fit(Xt, y)
+    return lambda te: m.predict(pd.get_dummies(te[FEATURES].astype({c: "category" for c in cats}), columns=cats)
+                                .reindex(columns=cols, fill_value=0))
+
+
+def compare_all(units: pd.DataFrame, cfg: M.Settings, test_days: int = 400, refit_every: int = 14) -> dict:
+    """予想する中身5種類 × 方法5通りを、同じ物差し（2台比べて当たる割合）で比べる。
+    採用: 当たる割合の平均がコイン投げより上で、それが偶然でない度合い（t値）が一番大きいもの。
+          ただし検証期間の前半・後半の両方で 0.5 を上回ったものに限る。"""
+    fr = build_frame(units, cfg)
+    days = sorted(fr.loc[fr["t_rank"].notna(), "date"].unique())
+    if len(days) < 80:
+        return {"ok": False, "reason": f"データが{len(days)}日分です（80日分で比較できます）"}
+    tdays = [pd.Timestamp(d) for d in days[-test_days:] if d >= days[60]]
+    res = {(t, m): [] for t in TARGETS for m in T_METHODS}
+    cache_day, fitted = None, {}
+    for d in tdays:
+        if cache_day is None or (d - cache_day).days >= refit_every:
+            cache_day = d
+            tr = fr[fr["date"] < d]
+            fitted = {(t, m): _fit_model(m, tr, t) for t in TARGETS for m in ("ridge", "gbm")}
+        day = fr[fr["date"] == d]
+        for t, (lab, binary) in TARGETS.items():
+            te = day[day[t].notna()]
+            if len(te) < 10:
+                continue
+            yv = te[t].to_numpy()
+            pr = {"ridge": fitted[(t, "ridge")](te), "gbm": fitted[(t, "gbm")](te)}
+            pr["ensemble"] = (pd.Series(pr["ridge"]).rank().to_numpy() + pd.Series(pr["gbm"]).rank().to_numpy()) / 2 / len(te)
+            for m in ("prev", "unit_mean"):
+                pr[m] = _fit_predict(m, None, te, target=t)
+            for m in T_METHODS:
+                c = _concord(np.nan_to_num(pr[m]), yv, binary)
+                if not np.isnan(c):
+                    res[(t, m)].append(c - 0.5)
+    summary = {}
+    for (t, m), v in res.items():
+        if len(v) < 20:
+            continue
+        v = np.array(v)
+        h = len(v) // 2
+        se = float(v.std() / np.sqrt(len(v))) or 1e-9
+        summary[f"{t}|{m}"] = {"target": t, "method": m, "target_label": TARGETS[t][0], "label": "台ごとのこれまでの平均" if m == "unit_mean" else LABEL[m],
+                               "acc": round(0.5 + float(v.mean()), 4), "t": round(float(v.mean()) / se, 2),
+                               "first": round(0.5 + float(v[:h].mean()), 4), "second": round(0.5 + float(v[h:].mean()), 4),
+                               "days": len(v)}
+    good = {k: v for k, v in summary.items() if v["first"] > 0.5 and v["second"] > 0.5}
+    best = max(good, key=lambda k: good[k]["t"]) if good else None
+    return {"ok": True, "best": best, "summary": summary, "test_days": len(tdays), "n_days": len(days)}
+
+
+def predict_target(units: pd.DataFrame, cfg: M.Settings, target: str, method: str, day) -> pd.DataFrame | None:
+    """選ばれた中身・方法で、対象日の全台の予想値を出す。"""
+    fr = build_frame(units, cfg, target=pd.Timestamp(day))
+    t = pd.Timestamp(day)
+    tr, te = fr[fr["date"] < t], fr[fr["date"] == t]
+    if te.empty or tr[target].notna().sum() < 1000:
+        return None
+    return pd.DataFrame({"unit": te["unit"].astype(int).to_numpy(), "ml_score": _fit_predict(method, tr, te, target=target)})
 
 
 def predict(units: pd.DataFrame, cfg: M.Settings, method: str, target) -> pd.DataFrame | None:

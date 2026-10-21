@@ -331,18 +331,18 @@ def cmd_compare(cfg, db, root: Path, force: bool = False) -> dict | None:
     n_days = units["date"].nunique() if len(units) else 0
     s = C.model_settings(cfg)
     old = load_methods(root)
-    if not force and old.get("ok") and old.get("goal") == s.goal:
+    if not force and old.get("ok") and old.get("kind") == "all":
         when = Date.fromisoformat(old.get("when", "2000-01-01"))
         if (today_jst() - when).days < 7 and n_days < int(old.get("n_days", 0) * 1.2) + 1:
             return None
-    if s.goal != "rank":
-        return None
-    res = ml.compare(units, hall, s)
+    res = ml.compare_all(units, s)
     res["when"] = str(today_jst())
-    res["goal"] = s.goal
+    res["kind"] = "all"
     (root / "data" / "methods.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-    if res.get("ok"):
-        log.info("予想方法を比較: 一番よいのは %s", ml.LABEL.get(res["best"], res["best"]))
+    if res.get("ok") and res.get("best"):
+        b = res["summary"][res["best"]]
+        log.info("予想方法を比較: 一番当たるのは「%s」を「%s」で予想（2台比べて当たる割合 %.1f%%）",
+                 b["target_label"], b["label"], b["acc"] * 100)
     return res
 
 
@@ -425,11 +425,12 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     m = M.train(units, hall, s)
     pred = M.predict(m, target)
     meth = load_methods(root)
-    best = meth.get("best") if meth.get("ok") and meth.get("goal") == s.goal else None
-    if best and best not in ("factor", "benchmark_zero"):
-        try:   # 比較で一番よかった方法の点数で並べ直す
+    best = meth.get("best") if meth.get("ok") and meth.get("kind") == "all" else None
+    if best:
+        try:   # 比較で一番当たった「中身×方法」の予想値で並べ直す
             from . import ml
-            ms = ml.predict(units, s, best, target)
+            tgt, mth = best.split("|")
+            ms = ml.predict_target(units, s, tgt, mth, target)
             if ms is not None:
                 why = ml.explain(units, s, target)
                 pred = pred.merge(ms, on="unit", how="left")
@@ -439,6 +440,8 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
                 pred = pred.sort_values("score", ascending=False).reset_index(drop=True)
                 pred["rank"] = np.arange(1, len(pred) + 1)
                 pred.attrs["method"] = best
+                pred.attrs["target"] = tgt
+                pred.attrs["mth"] = mth
         except Exception as e:
             log.warning("予想方法 %s での予想に失敗（これまでの方法で表示）: %s", best, e)
     pred_dir = root / "data" / "predictions"

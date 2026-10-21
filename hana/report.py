@@ -78,6 +78,18 @@ table.rk td.sparkc{display:none}
 """
 
 
+def pred_value_text(target, mth, v) -> str:
+    """選ばれた中身の予想値を、読める形にする。"""
+    if v is None or pd.isna(v):
+        return ""
+    if mth == "ensemble":
+        return f"予想の順位 上位{(1 - float(v)) * 100:.0f}%"
+    v = float(v)
+    return {"t_rank": f"予想の差枚順位 上位{(1 - v) * 100:.0f}%", "t_diff": f"予想差枚 {v:+,.0f}枚",
+            "t_plus": f"プラス終了の見込み {v * 100:.0f}%", "t_payout": f"予想出率 {100 + v * 100:.1f}%",
+            "t_eset": f"予想の推定設定 {v:.2f}"}.get(target, "")
+
+
 GOAL_WORD = {"plus": "プラス終了", "rank": "プラス終了", "high": "高設定っぽい"}
 
 
@@ -371,7 +383,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<td class='unit'>{u}</td>"
             f"<td class='score'><div class='pct'><span class='mark'>{mark}</span> {rel:.0f}<small>点</small></div>"
             f"<div class='bar'><i style='width:{max(rel, 3):.0f}%'></i></div>"
-            + (f"<div class='ratio'>同じ条件の台の過去平均：差枚順位 上位{(1 - p) * 100:.0f}%</div></td>"
+            + (f"<div class='ratio'>{pred_value_text(pred.attrs.get('target'), pred.attrs.get('mth'), r.get('ml_score'))}</div></td>"
+               if pred.attrs.get("target") else
+               f"<div class='ratio'>同じ条件の台の過去平均：差枚順位 上位{(1 - p) * 100:.0f}%</div></td>"
                if cfg.goal == "rank" else f"<div class='ratio'>見込み {p*100:.1f}%・平常の×{ratio:.2f}</div></td>")
             + f"<td class='reasons'>{chips or '<span class=note>特になし</span>'}</td>"
             f"<td class='prevc'>{prev}</td><td class='sparkc'>{sp}</td></tr>")
@@ -383,13 +397,12 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         meth = _json.loads((Path(pred_dir).parent / "methods.json").read_text(encoding="utf-8")) if pred_dir else {}
     except Exception:
         meth = {}
-    if cfg.goal == "rank" and pred.attrs.get("method") and meth.get("ok"):
+    if pred.attrs.get("method") and meth.get("ok") and meth.get("kind") == "all":
         v = meth["summary"].get(pred.attrs["method"], {})
-        rank_note = (f"<p class='note'>全{len(pred)}台を、今日の差枚が多くなりそうな順に並べています（点数は1位＝100点・最下位＝0点）。"
-                     f"予想方法は、{len(meth['summary'])}通りの方法を過去{meth['test_days']}日で比べて一番成績がよかった"
-                     f"「{E(v.get('label', ''))}」です（予想の順位と実際の差枚順位の一致度 {v.get('rho', 0):+.3f}・"
-                     f"予想上位5台の平均差枚 {v.get('top5_diff', 0):+,.0f}枚／全台平均 {v.get('all_diff', 0):+,.0f}枚）。"
-                     "下の「予想方法の比較」に全部の成績があります。</p>")
+        rank_note = (f"<p class='note'>予想の中身5種類×方法5通り（{len(meth['summary'])}通り）を過去{meth['test_days']}日で比べ、"
+                     f"一番よく当たった「<b>{E(v.get('target_label', ''))}</b>を<b>{E(v.get('label', ''))}</b>で予想」で並べています"
+                     f"（点数は1位＝100点・最下位＝0点）。この方法で2台を比べて上下を当てられた割合は {v.get('acc', 0.5)*100:.1f}%"
+                     f"（コイン投げなら50%・偶然でない度合い t={v.get('t', 0):.1f}）。下の「予想方法の比較」に全部の成績があります。</p>")
     elif cfg.goal == "rank":
         rho = (bt or {}).get("rho")
         rank_note = (f"<p class='note'>全{len(pred)}台を、今日の差枚が多くなりそうな順に並べています（点数は1位＝100点・最下位＝0点）。"
@@ -465,7 +478,20 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
 
     # 予想方法の比較
     msec = ""
-    if meth.get("ok"):
+    if meth.get("ok") and meth.get("kind") == "all":
+        rows_m = "".join(
+            f"<tr{' style=\'font-weight:700\'' if k == meth.get('best') else ''}><td>{E(v['target_label'])}</td>"
+            f"<td>{E(v['label'])}{' ★採用' if k == meth.get('best') else ''}</td>"
+            f"<td class='num'>{v['acc']*100:.1f}%</td><td class='num'>{v['t']:.1f}</td>"
+            f"<td class='num'>{v['first']*100:.1f}%／{v['second']*100:.1f}%</td></tr>"
+            for k, v in sorted(meth["summary"].items(), key=lambda kv: -kv[1]["t"]))
+        msec = (f"<h2>予想方法の比較</h2><p class='note'>過去{meth['test_days']}日の各日を、その日より前のデータだけで予想し直して採点"
+                f"（{meth.get('when', '')}時点・週1回とデータが2割増えるたびにやり直し）。当たる割合＝その日の台を2台ずつ比べて、"
+                "予想で上にした方が実際にも上だった割合（プラス終了はAUC）。50%がコイン投げ。t＝偶然でない度合い（2以上でおおむね偶然ではない）。"
+                "前半・後半の両方で50%を上回ったものの中から、tが一番大きいものを採用します。</p>"
+                f"<div class='scroll'><table class='mini'><tr><th>予想する中身</th><th>方法</th><th>当たる割合</th><th>t</th>"
+                f"<th>前半／後半</th></tr>{rows_m}</table></div>")
+    elif meth.get("ok"):
         rows_m = "".join(
             f"<tr{' style=\'font-weight:700\'' if k == meth['best'] else ''}><td>{E(v['label'])}{' ★採用' if k == meth['best'] else ''}</td>"
             f"<td class='num'>{v['rho']:+.3f}</td><td class='num'>{v['rho_first']:+.3f}／{v['rho_second']:+.3f}</td>"
