@@ -4,45 +4,38 @@
   "f_digit",
   "f_wday",
   "f_special",
-  "f_unit",
   "f_match",
   "h_digit",
   "h_wday"
  ],
  "unit_factors": [
-  "f_unit",
   "f_match"
  ],
- "score": 0.0388,
+ "score": 0.0222,
  "base_score": 0.0,
  "steps": [
   {
-   "add": "f_unit",
-   "label": "台ごとの入りやすさ",
-   "gain": 0.0285
-  },
-  {
    "add": "f_match",
    "label": "台番末尾と日付末尾の一致",
-   "gain": 0.0103
+   "gain": 0.0222
   }
  ],
  "single": {
-  "f_seq2": -0.018,
-  "f_seq3": -0.0036,
-  "f_unit": 0.0285,
-  "f_udigit": 0.0172,
-  "f_match": 0.0233,
-  "f_corner": 0.0104,
-  "f_prevdiff": -0.0152,
-  "f_prevhigh": -0.0415,
-  "f_streak": -0.0081,
-  "f_recent": -0.0208,
-  "f_busy": 0.0169
+  "f_seq2": -0.022,
+  "f_seq3": -0.0018,
+  "f_unit": 0.0,
+  "f_udigit": 0.0101,
+  "f_match": 0.0222,
+  "f_corner": 0.0112,
+  "f_prevdiff": -0.0129,
+  "f_prevhigh": -0.0561,
+  "f_streak": -0.0051,
+  "f_recent": -0.0226,
+  "f_busy": 0.0183
  },
  "test_days": 90,
- "n_days": 515,
+ "n_days": 621,
  "top_k": 5,
- "when": "2026-10-21",
+ "when": "2026-10-22",
  "goal": "rank"
 }

@@ -1,6 +1,6 @@
 {
  "ok": true,
- "best": "t_payout|ensemble",
+ "best": "t_payout|gbm",
  "summary": {
   "t_rank|prev": {
    "target": "t_rank",
@@ -8,9 +8,9 @@
    "target_label": "差枚の順位",
    "label": "前日の値そのまま",
    "acc": 0.4983,
-   "t": -0.74,
-   "first": 0.493,
-   "second": 0.5036,
+   "t": -0.77,
+   "first": 0.4931,
+   "second": 0.5034,
    "days": 400
   },
   "t_rank|unit_mean": {
@@ -18,10 +18,10 @@
    "method": "unit_mean",
    "target_label": "差枚の順位",
    "label": "台ごとのこれまでの平均",
-   "acc": 0.5014,
-   "t": 0.6,
-   "first": 0.4998,
-   "second": 0.5029,
+   "acc": 0.4979,
+   "t": -1.0,
+   "first": 0.4942,
+   "second": 0.5015,
    "days": 400
   },
   "t_rank|ridge": {
@@ -29,10 +29,10 @@
    "method": "ridge",
    "target_label": "差枚の順位",
    "label": "全特徴の重み付き足し算（リッジ回帰）",
-   "acc": 0.5086,
-   "t": 3.7,
-   "first": 0.5108,
-   "second": 0.5064,
+   "acc": 0.5078,
+   "t": 3.27,
+   "first": 0.5084,
+   "second": 0.5071,
    "days": 400
   },
   "t_rank|gbm": {
@@ -40,10 +40,10 @@
    "method": "gbm",
    "target_label": "差枚の順位",
    "label": "勾配ブースティング木（機械学習）",
-   "acc": 0.5067,
-   "t": 2.8,
-   "first": 0.5121,
-   "second": 0.5013,
+   "acc": 0.5074,
+   "t": 3.0,
+   "first": 0.5101,
+   "second": 0.5046,
    "days": 400
   },
   "t_rank|ensemble": {
@@ -51,10 +51,10 @@
    "method": "ensemble",
    "target_label": "差枚の順位",
    "label": "リッジと機械学習の平均",
-   "acc": 0.5084,
-   "t": 3.54,
-   "first": 0.5128,
-   "second": 0.5039,
+   "acc": 0.5085,
+   "t": 3.53,
+   "first": 0.5104,
+   "second": 0.5066,
    "days": 400
   },
   "t_diff|prev": {
@@ -63,9 +63,9 @@
    "target_label": "差枚の枚数",
    "label": "前日の値そのまま",
    "acc": 0.4977,
-   "t": -1.02,
-   "first": 0.4924,
-   "second": 0.503,
+   "t": -1.04,
+   "first": 0.4925,
+   "second": 0.5028,
    "days": 400
   },
   "t_diff|unit_mean": {
@@ -73,10 +73,10 @@
    "method": "unit_mean",
    "target_label": "差枚の枚数",
    "label": "台ごとのこれまでの平均",
-   "acc": 0.4994,
-   "t": -0.27,
-   "first": 0.4985,
-   "second": 0.5003,
+   "acc": 0.4965,
+   "t": -1.52,
+   "first": 0.4946,
+   "second": 0.4985,
    "days": 400
   },
   "t_diff|ridge": {
@@ -84,10 +84,10 @@
    "method": "ridge",
    "target_label": "差枚の枚数",
    "label": "全特徴の重み付き足し算（リッジ回帰）",
-   "acc": 0.5063,
-   "t": 2.61,
-   "first": 0.5093,
-   "second": 0.5034,
+   "acc": 0.5041,
+   "t": 1.69,
+   "first": 0.5056,
+   "second": 0.5026,
    "days": 400
   },
   "t_diff|gbm": {
@@ -95,10 +95,10 @@
    "method": "gbm",
    "target_label": "差枚の枚数",
    "label": "勾配ブースティング木（機械学習）",
-   "acc": 0.5064,
-   "t": 2.58,
-   "first": 0.5139,
-   "second": 0.4989,
+   "acc": 0.5073,
+   "t": 3.03,
+   "first": 0.5124,
+   "second": 0.5023,
    "days": 400
   },
   "t_diff|ensemble": {
@@ -106,10 +106,10 @@
    "method": "ensemble",
    "target_label": "差枚の枚数",
    "label": "リッジと機械学習の平均",
-   "acc": 0.5067,
-   "t": 2.79,
-   "first": 0.5126,
-   "second": 0.5009,
+   "acc": 0.5062,
+   "t": 2.52,
+   "first": 0.5097,
+   "second": 0.5027,
    "days": 400
   },
   "t_plus|prev": {
@@ -117,10 +117,10 @@
    "method": "prev",
    "target_label": "プラスで終わるか",
    "label": "前日の値そのまま",
-   "acc": 0.4978,
-   "t": -0.63,
-   "first": 0.4886,
-   "second": 0.507,
+   "acc": 0.4981,
+   "t": -0.53,
+   "first": 0.4892,
+   "second": 0.5071,
    "days": 400
   },
   "t_plus|unit_mean": {
@@ -128,10 +128,10 @@
    "method": "unit_mean",
    "target_label": "プラスで終わるか",
    "label": "台ごとのこれまでの平均",
-   "acc": 0.4989,
-   "t": -0.29,
-   "first": 0.4997,
-   "second": 0.4981,
+   "acc": 0.4979,
+   "t": -0.57,
+   "first": 0.4942,
+   "second": 0.5017,
    "days": 400
   },
   "t_plus|ridge": {
@@ -139,10 +139,10 @@
    "method": "ridge",
    "target_label": "プラスで終わるか",
    "label": "全特徴の重み付き足し算（リッジ回帰）",
-   "acc": 0.512,
-   "t": 2.96,
-   "first": 0.5177,
-   "second": 0.5062,
+   "acc": 0.511,
+   "t": 2.68,
+   "first": 0.5145,
+   "second": 0.5075,
    "days": 400
   },
   "t_plus|gbm": {
@@ -150,10 +150,10 @@
    "method": "gbm",
    "target_label": "プラスで終わるか",
    "label": "勾配ブースティング木（機械学習）",
-   "acc": 0.5089,
-   "t": 2.2,
-   "first": 0.5135,
-   "second": 0.5043,
+   "acc": 0.5114,
+   "t": 2.7,
+   "first": 0.5184,
+   "second": 0.5044,
    "days": 400
   },
   "t_plus|ensemble": {
@@ -161,10 +161,10 @@
    "method": "ensemble",
    "target_label": "プラスで終わるか",
    "label": "リッジと機械学習の平均",
-   "acc": 0.5116,
-   "t": 2.83,
-   "first": 0.5184,
-   "second": 0.5048,
+   "acc": 0.5122,
+   "t": 2.89,
+   "first": 0.5186,
+   "second": 0.5059,
    "days": 400
   },
   "t_payout|prev": {
@@ -172,10 +172,10 @@
    "method": "prev",
    "target_label": "出率（差枚÷投入枚数）",
    "label": "前日の値そのまま",
-   "acc": 0.5009,
-   "t": 0.33,
+   "acc": 0.5008,
+   "t": 0.3,
    "first": 0.4967,
-   "second": 0.505,
+   "second": 0.5049,
    "days": 400
   },
   "t_payout|unit_mean": {
@@ -183,10 +183,10 @@
    "method": "unit_mean",
    "target_label": "出率（差枚÷投入枚数）",
    "label": "台ごとのこれまでの平均",
-   "acc": 0.5011,
-   "t": 0.45,
-   "first": 0.4984,
-   "second": 0.5038,
+   "acc": 0.5001,
+   "t": 0.04,
+   "first": 0.4986,
+   "second": 0.5016,
    "days": 400
   },
   "t_payout|ridge": {
@@ -194,9 +194,9 @@
    "method": "ridge",
    "target_label": "出率（差枚÷投入枚数）",
    "label": "全特徴の重み付き足し算（リッジ回帰）",
-   "acc": 0.5131,
-   "t": 5.07,
-   "first": 0.5141,
+   "acc": 0.5117,
+   "t": 4.51,
+   "first": 0.5113,
    "second": 0.512,
    "days": 400
   },
@@ -205,10 +205,10 @@
    "method": "gbm",
    "target_label": "出率（差枚÷投入枚数）",
    "label": "勾配ブースティング木（機械学習）",
-   "acc": 0.5162,
-   "t": 5.65,
-   "first": 0.5246,
-   "second": 0.5078,
+   "acc": 0.5177,
+   "t": 6.42,
+   "first": 0.5239,
+   "second": 0.5114,
    "days": 400
   },
   "t_payout|ensemble": {
@@ -216,10 +216,10 @@
    "method": "ensemble",
    "target_label": "出率（差枚÷投入枚数）",
    "label": "リッジと機械学習の平均",
-   "acc": 0.5164,
-   "t": 6.01,
-   "first": 0.5218,
-   "second": 0.511,
+   "acc": 0.5168,
+   "t": 6.15,
+   "first": 0.5202,
+   "second": 0.5133,
    "days": 400
   },
   "t_eset|prev": {
@@ -229,8 +229,8 @@
    "label": "前日の値そのまま",
    "acc": 0.504,
    "t": 1.56,
-   "first": 0.501,
-   "second": 0.507,
+   "first": 0.502,
+   "second": 0.5061,
    "days": 400
   },
   "t_eset|unit_mean": {
@@ -240,8 +240,8 @@
    "label": "台ごとのこれまでの平均",
    "acc": 0.5021,
    "t": 0.78,
-   "first": 0.4999,
-   "second": 0.5043,
+   "first": 0.5009,
+   "second": 0.5032,
    "days": 400
   },
   "t_eset|ridge": {
@@ -249,10 +249,10 @@
    "method": "ridge",
    "target_label": "推定設定（高設定っぽさ）",
    "label": "全特徴の重み付き足し算（リッジ回帰）",
-   "acc": 0.5126,
-   "t": 4.87,
-   "first": 0.519,
-   "second": 0.5061,
+   "acc": 0.5109,
+   "t": 4.18,
+   "first": 0.5168,
+   "second": 0.5051,
    "days": 400
   },
   "t_eset|gbm": {
@@ -261,9 +261,9 @@
    "target_label": "推定設定（高設定っぽさ）",
    "label": "勾配ブースティング木（機械学習）",
    "acc": 0.5149,
-   "t": 5.56,
-   "first": 0.5255,
-   "second": 0.5044,
+   "t": 5.39,
+   "first": 0.5211,
+   "second": 0.5088,
    "days": 400
   },
   "t_eset|ensemble": {
@@ -271,15 +271,15 @@
    "method": "ensemble",
    "target_label": "推定設定（高設定っぽさ）",
    "label": "リッジと機械学習の平均",
-   "acc": 0.5151,
-   "t": 5.7,
-   "first": 0.5241,
-   "second": 0.506,
+   "acc": 0.5137,
+   "t": 5.02,
+   "first": 0.5198,
+   "second": 0.5076,
    "days": 400
   }
  },
  "test_days": 400,
- "n_days": 515,
- "when": "2026-10-21",
+ "n_days": 621,
+ "when": "2026-10-22",
  "kind": "all"
 }
