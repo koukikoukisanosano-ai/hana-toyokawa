@@ -90,6 +90,125 @@ def pred_value_text(target, mth, v) -> str:
             "t_eset": f"予想の推定設定 {v:.2f}"}.get(target, "")
 
 
+# ---------------------------------------------------------------- 予想システム（sysmodel）用の表示
+def _pc(x) -> str:
+    return "-" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{100 + x * 100:.2f}%"
+
+
+def _coins(x) -> str:
+    return "-" if x is None or (isinstance(x, float) and np.isnan(x)) else f"{x * 24000:+,.0f}枚"
+
+
+def _se_txt(se) -> str:
+    if se is None or (isinstance(se, float) and np.isnan(se)):
+        return ""
+    return f"<small> ±{se * 100:.2f}</small>"
+
+
+def sys_bucket_text(info: dict, rank: int) -> str:
+    """その順位の台が、過去の答え合わせで実際どれだけ出たか。"""
+    b = next((x for x in (info.get("summary") or {}).get("buckets", []) if x["from"] <= rank <= x["to"]), None)
+    if not b:
+        return ""
+    rng = f"{b['from']}位" if b["from"] == b["to"] else f"{b['from']}〜{min(b['to'], 99)}位"
+    return f"過去の{rng}の台：出率 {_pc(b['pay'])}（全台平均より{b['lift'] * 100:+.2f}%・8000Gで{b['lift'] * 24000:+,.0f}枚）"
+
+
+def sys_note(info: dict, n_units: int) -> str:
+    sm = info.get("summary") or {}
+    st = next((x for x in sm.get("strategies", []) if x["period"] == "全期間"), None)
+    head = (f"全{n_units}台を、今日の出率（払い出し÷投入）が高そうな順に並べています。予想は機械学習（勾配ブースティング木）で、"
+            "直近の差枚（凹み・出すぎ）、前日の結果、機種、日の種類などから学習し、2週間ごとに学び直します。")
+    if st:
+        r = {x["label"]: x for x in st["rows"]}
+        a, t1 = r.get("毎日行く・適当な台（全台平均）"), r.get("毎日行く・予想1位の台")
+        if a and t1:
+            head += (f"過去{st['days']}日の答え合わせでは、予想1位の台の出率は {_pc(t1['pay'])}"
+                     f"（全台平均 {_pc(a['pay'])}・8000G打った場合 {_coins(t1['pay'])} 対 {_coins(a['pay'])}）。")
+    return head + "点数は今日の中での位置（1位＝100点）。詳しくは下の「2年間の答え合わせ」。"
+
+
+def sys_answer_section(info: dict) -> str:
+    sm = info.get("summary") or {}
+    if not sm.get("strategies"):
+        return ""
+    blocks = []
+    for st in sm["strategies"]:
+        rows = "".join(
+            f"<tr{' style=\'font-weight:700\'' if '強い日だけ行く・予想1位' in x['label'] else ''}><td>{E(x['label'])}</td>"
+            f"<td class='num'>{_pc(x['pay'])}{_se_txt(x.get('se'))}</td>"
+            f"<td class='num'>{_coins(x['pay'])}</td><td class='num'>{x['days']}日</td></tr>" for x in st["rows"])
+        blocks.append(f"<div><h3 style='font-size:15px;margin:6px 0'>{E(st['period'])}（{st['since']}〜・{st['days']}日）</h3>"
+                      f"<table class='mini'><tr><th>やり方</th><th>出率</th><th>1日8000Gの平均</th><th>日数</th></tr>{rows}</table></div>")
+    mrows = "".join(
+        f"<tr><td>{m['ym']}</td><td class='num'>{_pc(m['all'])}</td><td class='num'>{_pc(m['t1'])}</td>"
+        f"<td class='num'>{_pc(m['t3'])}</td><td class='num'>{m['good']}/{m['days']}日</td></tr>"
+        for m in reversed(sm.get("monthly", [])))
+    brows = "".join(
+        f"<tr><td>{b['from']}位" + ("" if b['from'] == b['to'] else f"〜{min(b['to'], 99)}位") + "</td>"
+        f"<td class='num'>{_pc(b['pay'])}</td><td class='num'>{b['lift'] * 100:+.2f}%</td><td class='num'>{b['lift'] * 24000:+,.0f}枚</td></tr>"
+        for b in sm.get("buckets", []))
+    warn = ""
+    if sm.get("recent_t3_lift") is not None and sm["recent_t3_lift"] < 0:
+        warn = ("<div class='warn'>直近3か月は、予想上位3台の出率が全台平均を下回っています。店のやり方が変わった可能性があります"
+                "（予想は2週間ごとに学び直すので、変化に合わせて変わっていきます）。</div>")
+    return (f"<h2>2年間の答え合わせ</h2>{warn}<p class='note'>{sm.get('first')}〜{sm.get('last')}の各日を、"
+            "<b>その日より前のデータだけ</b>で予想し直し、実際の結果と比べました（学習は2週間ごとにやり直し）。"
+            "出率はBIG・REG回数とG数から計算しているので、他の人の打ち方（やめ方）の影響を受けにくい数字です。"
+            "「強い日」は、その日の時点で予想した店全体の出率が、それまでの予想の真ん中より上の日。"
+            f"±は偶然の幅のめやす（{sm.get('when', '')}時点・週1回作り直し）。</p>"
+            f"<div class='grid2'>{''.join(blocks)}</div>"
+            f"<div class='grid2'><div><h3 style='font-size:15px;margin:6px 0'>予想の順位ごとの実際の出率</h3>"
+            f"<table class='mini'><tr><th>予想の順位</th><th>出率</th><th>全台平均との差</th><th>8000G換算</th></tr>{brows}</table></div>"
+            f"<div><h3 style='font-size:15px;margin:6px 0'>月ごとの成績</h3><div class='scroll'><table class='mini'>"
+            f"<tr><th>月</th><th>全台平均</th><th>予想1位</th><th>予想上位3台</th><th>強い日</th></tr>{mrows}</table></div></div></div>")
+
+
+def sys_research_section(info: dict) -> str:
+    rs = info.get("research") or {}
+    if not rs.get("units"):
+        return ""
+    rows = "".join(
+        f"<tr{' style=\'font-weight:700\'' if u['method'] == rs.get('chosen') else ''}><td>{E(u['label'])}"
+        f"{' ★採用' if u['method'] == rs.get('chosen') else ''}</td>"
+        f"<td class='num'>{u['dev'] * 100:+.2f}%</td><td class='num'>{u['hold'] * 100:+.2f}%</td>"
+        f"<td class='num'>{u['all'] * 100:+.2f}%</td><td class='num'>{u['q_pos']}/{u['q_n']}</td></tr>"
+        for u in sorted(rs["units"], key=lambda u: -u["hold"]))
+    drows = "".join(
+        f"<tr{' style=\'font-weight:700\'' if x['method'] == rs.get('day_chosen') else ''}><td>{E(x['label'])}"
+        f"{' ★採用' if x['method'] == rs.get('day_chosen') else ''}</td><td class='num'>{x['gap'] * 100:+.2f}%</td></tr>"
+        for x in rs.get("days", []) if x["period"] == "all")
+    return (f"<h2>予想方法の比較（{rs.get('when')}に実施）</h2><p class='note'>データ {E(rs.get('data', ''))}。{E(rs.get('rule', ''))}"
+            f"開発期間 {E(rs.get('dev', ''))}／本番テスト期間 {E(rs.get('hold', ''))}。"
+            "数字は予想上位1・3・5台の出率が全台平均より何%高かったかの平均（1%＝8000Gで240枚）。"
+            "凹み台を狙う方法は2025年にはよく効いていましたが、2026年3月以降に店のやり方が変わって効かなくなりました。"
+            "機械学習は傾向を学び直すため、変化のあとも成績を保っていました。</p>"
+            f"<div class='scroll'><table class='mini'><tr><th>台の選び方</th><th>開発期間</th><th>本番テスト</th><th>全期間</th>"
+            f"<th>四半期ごとにプラス</th></tr>{rows}</table></div>"
+            f"<h3 style='font-size:15px;margin:10px 0 6px'>行く日の選び方（強いと予想した日と弱いと予想した日の出率の差・全期間）</h3>"
+            f"<table class='mini'><tr><th>日の選び方</th><th>差</th></tr>{drows}</table>")
+
+
+def sys_habits_section(info: dict) -> str:
+    hb = info.get("habits") or {}
+    if not hb.get("rebound"):
+        return ""
+    rr = "".join(f"<tr><td>{E(x['period'])}</td>" + "".join(f"<td class='num'>{v * 100:+.2f}%</td>" for v in x["q"])
+                 + f"<td class='num'>{x['days']}日</td></tr>" for x in hb["rebound"])
+    periods = [x["period"] for x in hb["rebound"]]
+    models = sorted({x["model"] for x in hb["models"]})
+    mr = "".join(
+        f"<tr><td>{E(m.split('‐')[0].split('-')[0])}</td>"
+        + "".join(f"<td class='num'>{_pc(next((x['pay'] for x in hb['models'] if x['model'] == m and x['period'] == pp), np.nan))}</td>"
+                  for pp in periods) + "</tr>" for m in models)
+    return ("<h2>この店の癖（いまのデータから毎回計算）</h2><div class='grid2'>"
+            "<div><h3 style='font-size:15px;margin:6px 0'>直近7日の差枚で5つに分けた台の、次の日の出率（全台平均との差）</h3>"
+            f"<div class='scroll'><table class='mini'><tr><th>期間</th><th>一番凹み</th><th>凹み</th><th>中</th><th>出</th><th>一番出</th><th>日数</th></tr>{rr}</table></div>"
+            "<p class='note'>左ほど上がる形なら「凹み台を上げる」癖。2025年ははっきり出ていましたが、最近は弱まっています。</p></div>"
+            "<div><h3 style='font-size:15px;margin:6px 0'>機種ごとの出率</h3>"
+            f"<table class='mini'><tr><th>機種</th>{''.join(f'<th>{E(pp)}</th>' for pp in periods)}</tr>{mr}</table></div></div>")
+
+
 GOAL_WORD = {"plus": "プラス終了", "rank": "プラス終了", "high": "高設定っぽい"}
 
 
@@ -239,9 +358,10 @@ def day_section(hist, target, cfg) -> str:
             f"今日（{E(t['why'])}・{E(t['cat'])}）のハナハナ全体の見込み出率 {t['pay']:.2f}%"
             f"（全日平均 {r['base']:.2f}%・1台8000G打った場合の期待差枚 {t['exp8000']:+,.0f}枚）"
             f"<div class='week'>{week}</div>"
-            f"<div class='sub'>この店のハナハナは「台の選び方」より「行く日」で差が出ています。混む日（土日・祝日・GW・お盆・年末年始）は"
-            f"出率が下がり、ただし混む日でも0・5のつく日は下がりません。平日では火曜がやや高め。"
-            f"2025年の傾向で2026年の各日も当たることを確認済みです（過去{r['n_days']}日から毎回計算し直し）。</div>"
+            f"<div class='sub'>混む日（土日・祝日・GW・お盆・年末年始）は出率が下がり、ただし混む日でも0・5のつく日は下がりません。"
+            f"平日では火曜がやや高め。この日の選び方は、過去の各日をその日より前のデータだけで予想し直しても、"
+            f"強いと予想した日が弱いと予想した日より出率が約0.4%高いことを確かめてあります（数字は過去{r['n_days']}日から毎回計算し直し）。"
+            f"座る台を選ぶ効果（下のランキング）と合わせて使うと一番成績がよくなります。</div>"
             f"<table class='mini'><tr><th>日の種類</th><th>出率</th><th>8000Gの期待差枚</th><th>日数</th></tr>{rows}</table></div>")
 
 
@@ -319,8 +439,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     exp_high = float(pred["score"].sum()) if n_units else 0.0
     avg_high = base * n_units
 
+    sysinfo = pred.attrs.get("system")
     tags = "".join(f"<span class='tag'>{E(t)}</span>" for t in info["tags"])
-    head = (f"<header><h1>{E(hall_name)} ハナハナ予想<small>{goal_title(cfg)}</small></h1>"
+    head = (f"<header><h1>{E(hall_name)} ハナハナ予想<small>{'行く日と座る台の予想' if sysinfo else goal_title(cfg)}</small></h1>"
             f"<div class='date'>{target.year}年{target.month}月{target.day}日({info['wday']}){tags}</div></header>")
 
     boxes = [
@@ -330,6 +451,13 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         (f"{model.n_days}日分", "学習に使ったデータ"),
         ("調整済" if model.tuned else "蓄積中", "要因の重み（45日分以上で自動調整）"),
     ]
+    if sysinfo:
+        st = next((x for x in (sysinfo.get("summary") or {}).get("strategies", []) if x["period"] == "全期間"), None)
+        r_ = {x["label"]: x for x in st["rows"]} if st else {}
+        t1, al = r_.get("毎日行く・予想1位の台"), r_.get("毎日行く・適当な台（全台平均）")
+        boxes = [(f"{n_units}台", "予想の対象台数"), boxes[1], (f"{model.n_days}日分", "学習に使ったデータ")]
+        if t1 and al:
+            boxes.append((_coins(t1["pay"]), f"予想1位の台・8000G打った場合の平均（過去{st['days']}日の答え合わせ・全台平均{_coins(al['pay'])}）"))
     if info_line.startswith("iPhoneからの最終受信: "):
         rest = info_line.split(": ", 1)[1]
         when, _, msg = rest.partition("（")
@@ -365,7 +493,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         p = float(r["score"])
         ratio = p / base if base > 0 else 1
         if isinstance(r.get("why"), list):
-            chips = "".join(f"<span class='chip'>{E(t)}</span>" for t in r["why"])
+            chips = "".join(f"<span class='chip'>{E(t)}</span>" for t in r["why"][:4])
         else:
             chips = "".join(f"<span class='chip {'p' if v > 0 else 'm'}' title='{E(d)}'>{'＋' if v > 0 else '－'}{E(t)}</span>"
                             for t, v, d in M.reasons(r, model))
@@ -384,7 +512,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
             f"<td class='unit'>{u}</td>"
             f"<td class='score'><div class='pct'><span class='mark'>{mark}</span> {rel:.0f}<small>点</small></div>"
             f"<div class='bar'><i style='width:{max(rel, 3):.0f}%'></i></div>"
-            + (f"<div class='ratio'>{pred_value_text(pred.attrs.get('target'), pred.attrs.get('mth'), r.get('ml_score'))}</div></td>"
+            + (f"<div class='ratio'>{E(sys_bucket_text(sysinfo, int(r['rank'])))}</div></td>"
+               if sysinfo else
+               f"<div class='ratio'>{pred_value_text(pred.attrs.get('target'), pred.attrs.get('mth'), r.get('ml_score'))}</div></td>"
                if pred.attrs.get("target") else
                f"<div class='ratio'>同じ条件の台の過去平均：差枚順位 上位{(1 - p) * 100:.0f}%</div></td>"
                if cfg.goal == "rank" else f"<div class='ratio'>見込み {p*100:.1f}%・平常の×{ratio:.2f}</div></td>")
@@ -398,7 +528,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         meth = _json.loads((Path(pred_dir).parent / "methods.json").read_text(encoding="utf-8")) if pred_dir else {}
     except Exception:
         meth = {}
-    if pred.attrs.get("method") and meth.get("ok") and meth.get("kind") == "all":
+    if sysinfo:
+        rank_note = f"<p class='note'>{E(sys_note(sysinfo, len(pred)))}</p>"
+    elif pred.attrs.get("method") and meth.get("ok") and meth.get("kind") == "all":
         v = meth["summary"].get(pred.attrs["method"], {})
         rank_note = (f"<p class='note'>予想の中身5種類×方法5通り（{len(meth['summary'])}通り）を過去{meth['test_days']}日で比べ、"
                      f"一番よく当たった「<b>{E(v.get('target_label', ''))}</b>を<b>{E(v.get('label', ''))}</b>で予想」で並べています"
@@ -506,6 +638,9 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
                 f"<div class='scroll'><table class='mini'><tr><th>方法</th><th>一致度</th><th>前半／後半</th><th>上位5台の平均差枚</th>"
                 f"<th>上位5台のプラス率</th></tr>{rows_m}</table></div>")
 
+    if sysinfo:      # 予想システムのときは、店の癖・答え合わせ・方法の比較を新しい形で出す
+        habit = sys_habits_section(sysinfo)
+        msec = ""
     # 検証
     btsec = msec + "<h2>過去データでの検証</h2>"
     if bt and bt.get("ok"):
@@ -526,6 +661,8 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
         reason = bt.get("reason") if bt else "まだ実行していません"
         btsec += f"<p class='note'>{E(reason)}</p>"
 
+    if sysinfo:
+        btsec = sys_answer_section(sysinfo) + sys_research_section(sysinfo)
     cov_txt = (f"データ: {cov.get('unit_first')}〜{cov.get('unit_last')}（{cov.get('unit_days')}日・{cov.get('unit_rows'):,}台日）"
                if cov.get("unit_rows") else "データなし")
     from datetime import timedelta, timezone
@@ -537,7 +674,8 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     doc = (f"<!doctype html><html lang='ja'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
            f"<title>ハナハナ予想 {target:%m/%d}</title><style>{CSS}</style></head><body><div class='wrap'>"
            f"{head}{status}{warn_html}{daysec}<h2>台別ランキング</h2>"
-           f"<p class='note'>{E(factor_note(model))}</p>{table}{mapsec}{judgesec}{check_section(hist, pred_dir, target)}"
+           + ("" if sysinfo else f"<p class='note'>{E(factor_note(model))}</p>")
+           + f"{table}{mapsec}{judgesec}{check_section(hist, pred_dir, target)}"
            f"{habit}{btsec}{foot}</div></body></html>")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{target:%Y-%m-%d}.html"

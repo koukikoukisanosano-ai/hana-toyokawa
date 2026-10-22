@@ -317,6 +317,34 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
     return res
 
 
+def run_system(cfg, units, root: Path, target: Date) -> dict:
+    """予想システム: 全台の点数、2年分の答え合わせ（週1回やり直し）、店の癖。"""
+    from . import sysmodel as SM
+    kw = cfg["target"].get("keyword", "ハナハナ")
+    ev = tuple(cfg["hall"].get("event_digits", [0, 5]))
+    d = SM.build(units, kw, ev, target=pd.Timestamp(target))
+    pred = SM.predict_units(d, target)
+    hp, sp = root / "data" / "system_history.csv", root / "data" / "system.json"
+    try:
+        summ = json.loads(sp.read_text(encoding="utf-8"))
+    except Exception:
+        summ = {}
+    n_days = int(d.loc[d["obs"], "date"].nunique())
+    when = summ.get("when", "2000-01-01")
+    if (not summ or summ.get("method") != SM.MAIN_METHOD or not hp.exists()
+            or (today_jst() - Date.fromisoformat(when)).days >= 7):
+        log.info("予想システムの答え合わせを作り直します（過去の各日を、その日より前のデータだけで予想し直す）")
+        h = SM.backtest(d)
+        h.to_csv(hp, index=False)
+        summ = {"when": str(today_jst()), "method": SM.MAIN_METHOD, "n_days": n_days, **SM.history_summary(h)}
+        sp.write_text(json.dumps(summ, ensure_ascii=False, indent=1, default=float), encoding="utf-8")
+    try:
+        research = json.loads((root / "data" / "research.json").read_text(encoding="utf-8"))
+    except Exception:
+        research = {}
+    return {"pred": pred, "summary": summ, "research": research, "habits": SM.habits(d)}
+
+
 def load_methods(root: Path) -> dict:
     try:
         return json.loads((root / "data" / "methods.json").read_text(encoding="utf-8"))
@@ -352,6 +380,8 @@ def run_checks(cfg, db, root: Path) -> None:
         detect_closed_days(cfg, db, root)
     except Exception as e:
         log.warning("休業日の確認でエラー: %s", e)
+    if cfg["predict"].get("method", "system") == "system":
+        return     # 予想システムの答え合わせは run_system の中で週1回作り直す
     try:
         cmd_select(cfg, db, root)
     except Exception as e:
@@ -424,26 +454,21 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     s = C.model_settings(cfg)
     m = M.train(units, hall, s)
     pred = M.predict(m, target)
-    meth = load_methods(root)
-    best = meth.get("best") if meth.get("ok") and meth.get("kind") == "all" else None
-    if best:
-        try:   # 比較で一番当たった「中身×方法」の予想値で並べ直す
-            from . import ml
-            tgt, mth = best.split("|")
-            ms = ml.predict_target(units, s, tgt, mth, target)
-            if ms is not None:
-                why = ml.explain(units, s, target)
-                pred = pred.merge(ms, on="unit", how="left")
-                r = pred["ml_score"].rank(method="average")
-                pred["score"] = ((r - 0.5) / r.notna().sum()).fillna(0.5)
-                pred["why"] = pred["unit"].map(lambda u: why.get(int(u), []))
+    if cfg["predict"].get("method", "system") == "system":
+        try:   # 2026/10/22 の比較で一番成績のよかった予想システム（sysmodel.py）で並べ直す
+            info = run_system(cfg, units, root, target)
+            sp = info.pop("pred", None)
+            if sp is not None:
+                pred = pred.drop(columns=[c for c in ("why",) if c in pred.columns]).merge(
+                    sp[["unit", "sys_score", "why"]], on="unit", how="left")
+                r = pred["sys_score"].rank(method="first")
+                pred["score"] = ((r - 0.5) / max(int(r.notna().sum()), 1)).fillna(0.0)
+                pred["why"] = pred["why"].apply(lambda v: v if isinstance(v, list) else [])
                 pred = pred.sort_values("score", ascending=False).reset_index(drop=True)
                 pred["rank"] = np.arange(1, len(pred) + 1)
-                pred.attrs["method"] = best
-                pred.attrs["target"] = tgt
-                pred.attrs["mth"] = mth
+                pred.attrs["system"] = info
         except Exception as e:
-            log.warning("予想方法 %s での予想に失敗（これまでの方法で表示）: %s", best, e)
+            log.warning("予想システムでの予想に失敗（これまでの方法で表示）: %s", e)
     pred_dir = root / "data" / "predictions"
     try:   # 台ごと・日ごとの判定設定を記録
         j = m.hist[["date", "unit", "model", "games", "bb", "rb", "diff", "gassan", "reg_den", "judge", "p_high"]].copy()
@@ -470,7 +495,7 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
         log.warning("環境の記録に失敗: %s", e)
     path = R.build(m, pred, target, cfg["hall"].get("name", ""), cfg["predict"].get("top_n", 10),
                    load_backtest(root), db.coverage(), root / "output",
-                   extra_warns=variation_note(units, s) + closed_notes(s, units, target) + status_warnings(root),
+                   extra_warns=variation_note(units, s, system=bool(pred.attrs.get("system"))) + closed_notes(s, units, target) + status_warnings(root),
                    pred_dir=pred_dir, info_line=status_line(root))
     if cfg.get("storage") == "csv":   # 答え合わせ用に予想を保存
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -483,7 +508,7 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     return path
 
 
-def variation_note(units, s) -> list[str]:
+def variation_note(units, s, system: bool = False) -> list[str]:
     """店全体の設定のばらつき（高設定を入れているか）のお知らせ。"""
     from .estimate import variation_test
     from .specs import spec_for
@@ -502,10 +527,11 @@ def variation_note(units, s) -> list[str]:
         eq.append(f"{m.split('‐')[0].split('-')[0]} 合算1/{x['gassan']:.0f}（設定{near}相当）")
     head = f"この店のハナハナ全体（{v['days']}日・{v['n']:,}台日）: " + "・".join(eq) + "。"
     if v["lr"] < 10:
+        tail = ("ただし小さな差はあり、2年分の答え合わせでは予想上位の台の出率が全台平均より約1%高くなっています（下の「2年間の答え合わせ」）。"
+                if system else "ランキングは参考程度に見てください。")
         return [head + f"台ごと・日ごとの数字のばらつきが「全台同じ設定」とした場合の運の範囲に収まっていて"
-                       f"（判定値 {v['lr']:.0f}／10未満）、高設定を入れている形跡が見つかりません。"
-                       "1日に設定6が3台・設定4が5台以上あればデータに表れるはずなので、それより少ないと考えられます。"
-                       "ランキングは参考程度に見てください。"]
+                       f"（判定値 {v['lr']:.0f}／10未満）、1日の数字で分かるほどの高設定（1日に設定6が3台・設定4が5台以上など）は"
+                       "入っていないと考えられます。" + tail]
     if v["lr"] < 30:
         return [head + f"設定のばらつきは少しだけ見えます（判定値 {v['lr']:.0f}）。高設定はごく少数と考えられます。"]
     return [head + f"設定のばらつきがはっきり見えます（判定値 {v['lr']:.0f}）。高設定を入れている店です。"]

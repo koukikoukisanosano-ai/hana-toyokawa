@@ -36,26 +36,25 @@ def why(d: Date) -> str:
 
 
 def estimate(hist: pd.DataFrame, target: Date, event_digits=(0, 5), days: int = 7, m: float = 15.0) -> dict:
-    h = hist[hist["games"] >= 1000].dropna(subset=["diff"])
+    """日の種類ごとの出率（その種類の日の全台の 差枚合計÷投入合計）。日数が少ない種類は全体に寄せる。"""
+    h = hist[hist["games"] > 0].dropna(subset=["diff"])
     if h.empty:
         return {}
-    t = h.assign(inn=3 * h["games"]).groupby("date").agg(diff=("diff", "sum"), inn=("inn", "sum"),
-                                                          plus=("diff", lambda s: (s > 0).mean())).reset_index()
+    t = h.assign(inn=3 * h["games"]).groupby("date").agg(diff=("diff", "sum"), inn=("inn", "sum")).reset_index()
     t["date"] = pd.to_datetime(t["date"])
     if len(t) < 30:
         return {}
-    t["pay"] = t["diff"] / t["inn"] * 100
     t["cat"] = [category(d.date(), event_digits) for d in t["date"]]
-    base = float(t["pay"].mean())
-    g = t.groupby("cat").agg(pay=("pay", "mean"), n=("pay", "size"), plus=("plus", "mean"))
+    base = float(t["diff"].sum() / t["inn"].sum() * 100)
+    g = t.groupby("cat").agg(diff=("diff", "sum"), inn=("inn", "sum"), n=("diff", "size"))
+    g["pay"] = g["diff"] / g["inn"] * 100
     g["est"] = (g["pay"] * g["n"] + base * m) / (g["n"] + m)
 
     def one(d: Date) -> dict:
         c = category(d, event_digits)
         est = float(g["est"].get(c, base))
         return {"date": d, "cat": c, "why": why(d), "pay": 100 + est, "delta": est - base,
-                "n": int(g["n"].get(c, 0)), "plus": float(g["plus"].get(c, np.nan)),
-                "exp8000": est / 100 * 24000}
+                "n": int(g["n"].get(c, 0)), "exp8000": est / 100 * 24000}
 
     table = [{"cat": c, "pay": 100 + float(r["est"]), "n": int(r["n"]), "exp8000": float(r["est"]) / 100 * 24000}
              for c, r in g.sort_values("est", ascending=False).iterrows()]

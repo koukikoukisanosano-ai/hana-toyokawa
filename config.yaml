@@ -45,3 +45,4 @@ predict:
   top_n: 10
   prev_max_gap: 1
   open_browser: false
+  method: system            # system=2026/10/22の比較で一番成績のよかった予想（機械学習・2週間ごとに学び直し）
