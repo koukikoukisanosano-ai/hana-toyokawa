@@ -3,7 +3,7 @@
 出力: data/survey/halls.json（店の一覧）, data/survey/rows.csv（店・日・機種・台番・G数・差枚・ボーナス合計）
 途中で止まっても、次に動かすと取っていない店・日から続ける。
 """
-import csv, json, re, sys, time
+import csv, json, os, re, sys, time
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -12,8 +12,11 @@ from hana.http import Fetcher, RateLimited
 from hana.sources import minrepo as MR
 
 CITIES = ["豊川市", "豊橋市", "蒲郡市", "新城市", "田原市"]
-DAYS_BACK, MAX_DAYS, KEY = 90, 45, "ハナハナ"
-OUT = Path("data/survey"); OUT.mkdir(parents=True, exist_ok=True)
+_cfg = json.loads(Path("tools/survey_config.json").read_text(encoding="utf-8")) if Path("tools/survey_config.json").exists() else {}
+DAYS_BACK, MAX_DAYS = int(_cfg.get("days_back", 90)), int(_cfg.get("max_days", 45))
+KEY = _cfg.get("keyword", "ハナハナ")                 # 機種名にこの文字を含む機種を集める
+ONLY = set(_cfg.get("halls", []))                     # 空なら全部の店
+OUT = Path(_cfg.get("out", "data/survey")); OUT.mkdir(parents=True, exist_ok=True)
 ROWS = OUT / "rows.csv"; HALLS = OUT / "halls.json"; DONE = OUT / "done.json"
 deadline = time.time() + 300 * 60
 today = date.today()
@@ -21,6 +24,10 @@ f = Fetcher(interval_sec=2, jitter_sec=1, engine="playwright")
 
 # 1) 店の一覧
 halls = json.loads(HALLS.read_text(encoding="utf-8")) if HALLS.exists() else {}
+if not halls and Path("data/survey/halls.json").exists():
+    halls = json.loads(Path("data/survey/halls.json").read_text(encoding="utf-8"))
+if ONLY:
+    halls = {k: v for k, v in halls.items() if v["name"] in ONLY}
 if not halls:
     for c in CITIES:
         base = f"https://min-repo.com/category/{quote('愛知県')}/{quote(c)}/"

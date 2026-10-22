@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['tools/survey*.py', '.github/workflows/survey.yml']
+    paths: ['tools/survey*', '.github/workflows/survey.yml']
 permissions:
   contents: write
 concurrency:
@@ -35,7 +35,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A data/survey
+          git add -A data/survey data/survey_juggler 2>/dev/null || git add -A data/survey
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -q -m "東三河調査の結果 $(date '+%Y-%m-%d %H:%M')"
           for i in 1 2 3 4 5; do git pull -q --rebase -X theirs && git push -q && break; git rebase --abort 2>/dev/null || true; sleep 7; done
