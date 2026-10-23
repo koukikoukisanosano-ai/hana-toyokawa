@@ -93,14 +93,74 @@ def spec_for(model: str) -> Spec:
     return GENERIC
 
 
-def coin_use_per_game(sp: Spec) -> float | None:
-    """1Gあたりの実質のコイン消費（小役の戻りを差し引いた枚数）。
-    公表の機械割があれば、各設定で「BIG枚数÷BIG分母＋REG枚数÷REG分母−3×(機械割−1)」を計算した平均を使う
-    （＝その機種のBIG・REG枚数と機械割に合うコイン持ち）。無ければ 50÷コイン持ち。"""
+# この店の設定配分（機種ごと）。data/setting_prior.json があればそれを使う（毎週データから推定し直す）。
+DEFAULT_WEIGHTS = (0.15, 0.30, 0.35, 0.15, 0.03, 0.02)    # ファイルが無いときの仮の配分（設定1〜4中心）
+_PRIOR_CACHE: dict | None = None
+
+
+def _prior_file() -> dict:
+    global _PRIOR_CACHE
+    if _PRIOR_CACHE is None:
+        import json
+        from pathlib import Path
+        p = Path(__file__).resolve().parents[1] / "data" / "setting_prior.json"
+        try:
+            _PRIOR_CACHE = json.loads(p.read_text(encoding="utf-8")).get("weights", {})
+        except Exception:
+            _PRIOR_CACHE = {}
+    return _PRIOR_CACHE
+
+
+def reload_prior() -> None:
+    global _PRIOR_CACHE
+    _PRIOR_CACHE = None
+
+
+def setting_weights(sp: Spec) -> list[float]:
+    """設定1〜6の配分（その機種に無い設定は0）。"""
+    w = _prior_file().get(sp.name)
+    if not w or len(w) != len(sp.bb):
+        w = list(DEFAULT_WEIGHTS[:len(sp.bb)])
+    w = [x if b else 0.0 for x, b in zip(w, sp.bb)]
+    t = sum(w) or 1.0
+    return [x / t for x in w]
+
+
+def _coin_use_by_setting(sp: Spec) -> list[float | None]:
+    """設定ごとの1Gあたりの実質消費 = BIG枚数÷BIG分母 ＋ REG枚数÷REG分母 − 3×(機械割−1)。"""
     if not (sp.big_coins and sp.reg_coins):
-        return None
-    vals = [sp.big_coins / b + sp.reg_coins / r - 3 * (p / 100 - 1)
-            for b, r, p in zip(sp.bb, sp.rb, sp.payout) if b and r and p]
-    if vals:
-        return sum(vals) / len(vals)
-    return 50.0 / sp.coin_mochi if sp.coin_mochi else None
+        return [None] * len(sp.bb)
+    return [sp.big_coins / b + sp.reg_coins / r - 3 * (p / 100 - 1) if b and r and p else None
+            for b, r, p in zip(sp.bb, sp.rb, sp.payout)]
+
+
+def coin_use_per_game(sp: Spec) -> float | None:
+    """店の設定配分で重み付けした、1Gあたりの実質消費（小役の戻りを差し引いた枚数）。
+    以前は設定1〜6の単純平均を使っていたが、設定1〜4中心の店では出率を0.2〜0.5%高く見積もってしまうため改めた。"""
+    cs = _coin_use_by_setting(sp)
+    if all(c is None for c in cs):
+        return 50.0 / sp.coin_mochi if sp.coin_mochi else None
+    w = setting_weights(sp)
+    pairs = [(x, c) for x, c in zip(w, cs) if c is not None]
+    t = sum(x for x, _ in pairs) or 1.0
+    return sum(x * c for x, c in pairs) / t
+
+
+def coin_use_given(sp: Spec, bb, rb, games) -> float | None:
+    """その台・その日の BIG・REG 回数から「どの設定だったか」の確率を出し、その設定に合った消費で平均する。"""
+    import math
+    cs = _coin_use_by_setting(sp)
+    if all(c is None for c in cs) or not games or games <= 0:
+        return coin_use_per_game(sp)
+    w = setting_weights(sp)
+    logs = []
+    for x, b, r, c in zip(w, sp.bb, sp.rb, cs):
+        if not b or c is None or x <= 0:
+            logs.append(None)
+            continue
+        lb, lr = games / b, games / r
+        logs.append(math.log(x) + bb * math.log(lb) - lb + rb * math.log(lr) - lr)
+    m = max(v for v in logs if v is not None)
+    ps = [math.exp(v - m) if v is not None else 0.0 for v in logs]
+    t = sum(ps)
+    return sum(p * c for p, c in zip(ps, cs) if c is not None) / t

@@ -510,9 +510,33 @@ def history_summary(h: pd.DataFrame) -> dict:
         buckets.append({"from": a, "to": b, "pay": p, "lift": p - allp})
     recent = h[h["date"] >= end - pd.Timedelta(days=91)]
     r_lift = _pay(recent["t3_d"].sum(), recent["t3_i"].sum()) - _pay(recent["day_diff"].sum(), recent["day_inn"].sum())
+    buckets = smooth_buckets(buckets)
     return {"strategies": strat, "monthly": monthly, "buckets": buckets, "all_pay": allp,
             "first": h["date"].min().date().isoformat(), "last": end.date().isoformat(), "days": len(h),
             "recent_t3_lift": r_lift}
+
+
+def smooth_buckets(buckets: list[dict]) -> list[dict]:
+    """順位ごとの出率を、上の順位ほど高い（同じ以上）形にならす（台数で重み付けした単調回帰）。"""
+    if not buckets:
+        return []
+    vals = [b["pay"] for b in buckets]
+    wts = [min(b["to"], 63) - b["from"] + 1 for b in buckets]
+    blocks = [[v, w, [i]] for i, (v, w) in enumerate(zip(vals, wts))]
+    i = 0
+    while i < len(blocks) - 1:
+        if blocks[i][0] < blocks[i + 1][0]:          # 下の順位の方が高い → まとめて平均
+            v = (blocks[i][0] * blocks[i][1] + blocks[i + 1][0] * blocks[i + 1][1]) / (blocks[i][1] + blocks[i + 1][1])
+            blocks[i] = [v, blocks[i][1] + blocks[i + 1][1], blocks[i][2] + blocks[i + 1][2]]
+            del blocks[i + 1]
+            i = max(i - 1, 0)
+        else:
+            i += 1
+    out = [dict(b) for b in buckets]
+    for v, _, idx in blocks:
+        for j in idx:
+            out[j]["pay_s"] = v
+    return out
 
 
 def bucket_of(rank: int) -> tuple[int, int]:

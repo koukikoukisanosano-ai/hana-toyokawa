@@ -191,9 +191,9 @@ def est_diff(bb, rb, games, model: str = "", coef=None) -> int | None:
     機種のスペックが未登録なら、実データで合わせた係数で見積もる。"""
     if bb is None or rb is None or games is None:
         return None
-    from ..specs import coin_use_per_game, spec_for
+    from ..specs import coin_use_given, spec_for
     sp = spec_for(model)
-    c = coin_use_per_game(sp)
+    c = coin_use_given(sp, bb, rb, games) if sp.big_coins and sp.reg_coins else None
     if c:
         return int(round(bb * sp.big_coins + rb * sp.reg_coins - games * c))
     a, b, c = coef or DEFAULT_COEF

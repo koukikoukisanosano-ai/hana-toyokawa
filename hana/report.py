@@ -44,6 +44,14 @@ tr.top td{background:color-mix(in srgb,var(--accent) 7%,var(--card))}
 .rank{font-weight:800;font-size:18px;width:42px;text-align:center}.unit{font-weight:800;font-size:20px;letter-spacing:.02em}
 .bar{position:relative;height:10px;background:var(--heat0);border-radius:5px;min-width:110px;overflow:hidden}
 .bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:5px}
+.calc{border:1px solid var(--line,#ddd);border-radius:12px;padding:12px;margin:8px 0;background:var(--card,#fff)}
+.qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:6px 0}
+.qgrid label{display:flex;flex-direction:column;font-size:12px;color:var(--sub)}
+.qgrid input,.qgrid select{font-size:16px;padding:6px 8px;border:1px solid #ccc;border-radius:8px;margin-top:2px;background:#fff;color:#222;width:100%;box-sizing:border-box}
+.qout{margin-top:10px}.qverdict{display:inline-block;font-size:22px;font-weight:800;padding:4px 14px;border-radius:10px;color:#fff}
+.q_go{background:#1f8a5b}.q_move{background:#d98a1c}.q_stop{background:#c8324b}
+.qwhy{margin:6px 0;font-weight:600}.qline{margin:4px 0}.qsub{font-size:12px;color:var(--sub)}
+details summary{cursor:pointer;margin:6px 0;color:var(--sub)}
 .pct{font-weight:700;font-size:16px}.pct small{font-size:11px;font-weight:400;margin-left:1px}.mark{font-size:18px}.ratio{color:var(--sub);font-size:12px}
 .chip{display:inline-block;border-radius:3px;padding:0 6px;margin:2px 4px 2px 0;font-size:12px;border:1px solid var(--line)}
 .chip.p{border-color:var(--good);color:var(--good)}.chip.m{color:var(--bad)}
@@ -107,11 +115,14 @@ def _se_txt(se) -> str:
 
 def sys_bucket_text(info: dict, rank: int) -> str:
     """その順位の台が、過去の答え合わせで実際どれだけ出たか。"""
-    b = next((x for x in (info.get("summary") or {}).get("buckets", []) if x["from"] <= rank <= x["to"]), None)
+    sm = info.get("summary") or {}
+    b = next((x for x in sm.get("buckets", []) if x["from"] <= rank <= x["to"]), None)
     if not b:
         return ""
+    pay = b.get("pay_s", b["pay"])
+    lift = pay - sm.get("all_pay", pay - b["lift"])
     rng = f"{b['from']}位" if b["from"] == b["to"] else f"{b['from']}〜{min(b['to'], 99)}位"
-    return f"過去の{rng}の台：出率 {_pc(b['pay'])}（全台平均より{b['lift'] * 100:+.2f}%・8000Gで{b['lift'] * 24000:+,.0f}枚）"
+    return f"過去の{rng}の台：出率 {_pc(pay)}（全台平均より{lift * 100:+.2f}%・8000Gで{pay * 24000:+,.0f}枚）"
 
 
 def sys_note(info: dict, n_units: int) -> str:
@@ -121,10 +132,11 @@ def sys_note(info: dict, n_units: int) -> str:
             "直近の差枚（凹み・出すぎ）、前日の結果、機種、日の種類などから学習し、2週間ごとに学び直します。")
     if st:
         r = {x["label"]: x for x in st["rows"]}
-        a, t1 = r.get("毎日行く・適当な台（全台平均）"), r.get("毎日行く・予想1位の台")
-        if a and t1:
-            head += (f"過去{st['days']}日の答え合わせでは、予想1位の台の出率は {_pc(t1['pay'])}"
-                     f"（全台平均 {_pc(a['pay'])}・8000G打った場合 {_coins(t1['pay'])} 対 {_coins(a['pay'])}）。")
+        a, t3 = r.get("毎日行く・適当な台（全台平均）"), r.get("毎日行く・予想上位3台のどれか")
+        if a and t3:
+            head += (f"過去{st['days']}日の答え合わせでは、予想上位3台の出率は {_pc(t3['pay'])}"
+                     f"（全台平均 {_pc(a['pay'])}・8000G打った場合 {_coins(t3['pay'])} 対 {_coins(a['pay'])}）。"
+                     "1台だけ選ぶと、どの台になるかの小さな違いで結果が大きくぶれるので、上位3台の中から空いている台を選ぶのがおすすめです。")
     return head + "点数は今日の中での位置（1位＝100点）。詳しくは下の「2年間の答え合わせ」。"
 
 
@@ -146,7 +158,8 @@ def sys_answer_section(info: dict) -> str:
         for m in reversed(sm.get("monthly", [])))
     brows = "".join(
         f"<tr><td>{b['from']}位" + ("" if b['from'] == b['to'] else f"〜{min(b['to'], 99)}位") + "</td>"
-        f"<td class='num'>{_pc(b['pay'])}</td><td class='num'>{b['lift'] * 100:+.2f}%</td><td class='num'>{b['lift'] * 24000:+,.0f}枚</td></tr>"
+        f"<td class='num'>{_pc(b['pay'])}</td><td class='num'>{_pc(b.get('pay_s', b['pay']))}</td>"
+        f"<td class='num'>{b.get('pay_s', b['pay']) * 24000:+,.0f}枚</td></tr>"
         for b in sm.get("buckets", []))
     warn = ""
     if sm.get("recent_t3_lift") is not None and sm["recent_t3_lift"] < 0:
@@ -159,7 +172,8 @@ def sys_answer_section(info: dict) -> str:
             f"±は偶然の幅のめやす（{sm.get('when', '')}時点・週1回作り直し）。</p>"
             f"<div class='grid2'>{''.join(blocks)}</div>"
             f"<div class='grid2'><div><h3 style='font-size:15px;margin:6px 0'>予想の順位ごとの実際の出率</h3>"
-            f"<table class='mini'><tr><th>予想の順位</th><th>出率</th><th>全台平均との差</th><th>8000G換算</th></tr>{brows}</table></div>"
+            f"<table class='mini'><tr><th>予想の順位</th><th>出率</th><th>ならした出率</th><th>8000G換算</th></tr>{brows}</table>"
+            "<p class='note'>「ならした出率」は、1位と2〜3位の逆転のような偶然の凸凹をならし、上の順位ほど高くなるようにした値。</p></div>"
             f"<div><h3 style='font-size:15px;margin:6px 0'>月ごとの成績</h3><div class='scroll'><table class='mini'>"
             f"<tr><th>月</th><th>全台平均</th><th>予想1位</th><th>予想上位3台</th><th>強い日</th></tr>{mrows}</table></div></div></div>")
 
@@ -207,6 +221,133 @@ def sys_habits_section(info: dict) -> str:
             "<p class='note'>左ほど上がる形なら「凹み台を上げる」癖。2025年ははっきり出ていましたが、最近は弱まっています。</p></div>"
             "<div><h3 style='font-size:15px;margin:6px 0'>機種ごとの出率</h3>"
             f"<table class='mini'><tr><th>機種</th>{''.join(f'<th>{E(pp)}</th>' for pp in periods)}</tr>{mr}</table></div></div>")
+
+
+# ---------------------------------------------------------------- 続けるか・移るか・やめるか（撤退の判断）
+QUIT_JS = """
+<script>
+(function(){
+const Q = __Q__;
+const MARGIN = __M__;
+const $ = id => document.getElementById(id);
+const num = id => { const v = parseFloat($(id).value); return isNaN(v) ? 0 : v; };
+function post(m, rank, G, B, R){
+  const P = Q.models[m]; if(!P) return null;
+  const bk = P.buckets.find(b => rank >= b.from && rank <= b.to) || P.buckets[P.buckets.length-1];
+  let best = -1e300; const logs = [];
+  for (let i = 0; i < P.pay.length; i++){
+    const w = bk.w[i];
+    if (!P.bb[i] || w <= 0){ logs.push(null); continue; }
+    let v = Math.log(w);
+    if (G > 0){ const lb = G / P.bb[i], lr = G / P.rb[i]; v += B*Math.log(lb) - lb + R*Math.log(lr) - lr; }
+    logs.push(v); if (v > best) best = v;
+  }
+  let n = 0, d = 0;
+  logs.forEach((v, i) => { if (v === null) return; const e = Math.exp(v - best); n += e * P.pay[i]; d += e; });
+  let eb = 0, er = 0; bk.w.forEach((w, i) => { if (P.bb[i]) { eb += w / P.bb[i]; er += w / P.rb[i]; } });
+  return {pay: n / d, prior: bk.mean, eb: eb * G, er: er * G};
+}
+function coins(pay, g){ return (pay - 100) / 100 * 3 * g; }
+function fmt(x){ return (x >= 0 ? "+" : "") + Math.round(x).toLocaleString() + "枚"; }
+function run(){
+  const m = $("q_m").value, rank = Math.max(1, num("q_r")), G = num("q_g"), B = num("q_b"), R = num("q_reg");
+  const rest = Math.max(0, num("q_rest"));
+  const c = post(m, rank, G, B, R); if (!c) return;
+  let html = "<div class='qline'>この台のこの先の見込み出率 <b>" + c.pay.toFixed(2) + "%</b>"
+    + "（打つ前の見込み " + c.prior.toFixed(2) + "%）<br>あと" + rest.toLocaleString() + "G打つと平均 <b>" + fmt(coins(c.pay, rest)) + "</b></div>";
+  if (G > 0) html += "<div class='qsub'>ここまで BIG " + B + "回（平均なら" + c.eb.toFixed(1) + "回）・REG " + R + "回（平均なら" + c.er.toFixed(1) + "回）</div>";
+  let alt = null;
+  if ($("a_r").value !== ""){
+    alt = post($("a_m").value, Math.max(1, num("a_r")), num("a_g"), num("a_b"), num("a_reg"));
+    if (alt) html += "<div class='qline'>移る候補の台の見込み出率 <b>" + alt.pay.toFixed(2) + "%</b>（あと" + rest.toLocaleString() + "Gで平均 " + fmt(coins(alt.pay, rest)) + "）</div>";
+  }
+  let verdict, cls, why;
+  if (c.pay < 100 && (!alt || alt.pay < 100)){
+    verdict = "やめる"; cls = "q_stop";
+    why = "この先は打つほど負けの見込みです（見込み出率が100%を下回っています）。";
+  } else if (alt && alt.pay - c.pay >= MARGIN){
+    verdict = "移る"; cls = "q_move";
+    why = "候補の台のほうが見込みが高く、あと" + rest.toLocaleString() + "Gで平均 " + fmt(coins(alt.pay, rest) - coins(c.pay, rest)) + " の差です。";
+  } else {
+    verdict = "続ける"; cls = "q_go";
+    why = c.pay < 100 ? "この台は100%を下回りますが、候補の台がそれより良いので移りましょう。"
+        : (alt && alt.pay > c.pay ? "候補の台のほうがわずかに上ですが、差が小さい（あと" + rest.toLocaleString() + "Gで " + fmt(coins(alt.pay, rest) - coins(c.pay, rest)) + "）ので、続けて問題ありません。"
+        : "この先も打つほどプラスの見込みです。出だしが悪くても、この店の設定の散らばり方では、まだ設定が低いとは言えません。");
+    if (c.pay < 100 && alt && alt.pay >= 100){ verdict = "移る"; cls = "q_move"; }
+  }
+  html = "<div class='qverdict " + cls + "'>" + verdict + "</div><div class='qwhy'>" + why + "</div>" + html;
+  $("q_out").innerHTML = html;
+}
+document.querySelectorAll("#qcalc input, #qcalc select").forEach(e => e.addEventListener("input", run));
+$("q_g").addEventListener("input", () => { if (!$("q_rest").dataset.touched) $("q_rest").value = Math.max(0, 8000 - num("q_g")); run(); });
+$("q_rest").addEventListener("input", () => { $("q_rest").dataset.touched = "1"; });
+run();
+})();
+</script>
+"""
+
+
+def quit_section(q: dict) -> str:
+    """続けるか・移るか・やめるかの計算機と早見表。"""
+    if not q or not q.get("params", {}).get("models"):
+        return ""
+    import json as _json
+    P = q["params"]
+    opts = "".join(f"<option value='{E(m)}'>{E(v['label'])}</option>" for m, v in P["models"].items())
+    rows = ""
+    for r in q.get("table", []):
+        def cell(x):
+            return "（まず起きない）" if not x else f"BIG{x[0]}・REG{x[1]}以下<small>（平均の{x[2] * 100:.0f}%）</small>"
+        rows += (f"<tr><td>{E(r['model'])}</td><td class='num'>{r['G']:,}G</td><td class='num'>BIG{r['avg'][0]}・REG{r['avg'][1]}</td>"
+                 f"<td>{cell(r['move'])}</td><td>{cell(r['stop'])}</td></tr>")
+    rs = q.get("research") or {}
+    sim = ""
+    if rs.get("rows"):
+        def pick(model, rank, pol, widen=1.0):
+            for x in rs["rows"]:
+                if x["model"] == model and x["rank"] == rank and abs(x["widen"] - widen) < 1e-9 and pol in x:
+                    return x[pol]
+            return None
+        lines = []
+        for lab in ("予想上位3台", "予想6〜10位", "予想21〜40位", "予想41位以下"):
+            k_go, k_st = pick("キングハナハナ", lab, "続行"), pick("キングハナハナ", lab, "撤退")
+            k_mv = pick("キングハナハナ", lab, "撤退＋移動")
+            if not (k_go and k_st):
+                continue
+            lines.append(f"<tr><td>{E(lab)}</td><td class='num'>{k_go['coins']:+,}枚</td>"
+                         f"<td class='num'>{k_st['coins']:+,}枚<small>（{k_st['diff']:+}・平均{k_st['games']:,}G・{k_st['stop'] * 100:.0f}%の日でやめる）</small></td>"
+                         f"<td class='num'>{(str(format(k_mv['coins'], '+,')) + '枚<small>（' + format(k_mv['diff'], '+') + '）</small>') if k_mv else '-'}</td></tr>")
+        sim = ("<h3 style='font-size:15px;margin:12px 0 6px'>基準に従うと得か（キングハナハナ・1日8000Gの計算）</h3>"
+               "<div class='scroll'><table class='mini'><tr><th>座った台</th><th>最後まで打つ</th><th>見込み100%未満でやめる</th>"
+               f"<th>やめる＋空き台へ移る</th></tr>{''.join(lines)}</table></div>"
+               f"<p class='note'>{E(rs.get('note', ''))}（{E(rs.get('when', ''))}計算）</p>")
+    js = QUIT_JS.replace("__Q__", _json.dumps(P, ensure_ascii=False)).replace("__M__", str(q.get("margin", 0.4)))
+    return ("<h2>続けるか・移るか・やめるか</h2>"
+            "<p class='note'>打っている台の、今日の<b>G数・BIG回数・REG回数</b>（データ機の数字）を入れると、"
+            "この先の見込み出率と、続ける／移る／やめるの判断を出します。ハナハナは毎ゲームが独立した抽選で天井もないので、"
+            "判断は「この台の設定がどれくらいか」の見込みだけで決まります。この店は設定1〜4の狭い範囲で動かしているため、"
+            "途中の出方では設定がなかなか分からず、<b>予想上位の台なら、出だしが悪くても続けるのが基本</b>です。"
+            "予想が下位の台は、少し悪いだけでやめる判断になります（そもそも座らないのが一番です）。</p>"
+            "<div id='qcalc' class='calc'>"
+            f"<div class='qgrid'><label>機種<select id='q_m'>{opts}</select></label>"
+            "<label>この台の予想順位<input id='q_r' type='number' inputmode='numeric' value='1' min='1' max='63'></label>"
+            "<label>今のG数<input id='q_g' type='number' inputmode='numeric' value='3000' min='0'></label>"
+            "<label>BIG回数<input id='q_b' type='number' inputmode='numeric' value='9' min='0'></label>"
+            "<label>REG回数<input id='q_reg' type='number' inputmode='numeric' value='5' min='0'></label>"
+            "<label>閉店まであと何G打てるか<input id='q_rest' type='number' inputmode='numeric' value='5000' min='0'></label></div>"
+            "<details><summary>空いている別の台に移るか迷うとき</summary><div class='qgrid'>"
+            f"<label>候補の機種<select id='a_m'>{opts}</select></label>"
+            "<label>候補の予想順位<input id='a_r' type='number' inputmode='numeric' placeholder='例: 4' min='1' max='63'></label>"
+            "<label>候補の今日のG数<input id='a_g' type='number' inputmode='numeric' value='0' min='0'></label>"
+            "<label>候補のBIG<input id='a_b' type='number' inputmode='numeric' value='0' min='0'></label>"
+            "<label>候補のREG<input id='a_reg' type='number' inputmode='numeric' value='0' min='0'></label></div></details>"
+            "<div id='q_out' class='qout'></div></div>"
+            "<h3 style='font-size:15px;margin:12px 0 6px'>早見表（予想上位3台に座っているとき・BIGとREGが同じ割合で少ない場合）</h3>"
+            "<div class='scroll'><table class='mini'><tr><th>機種</th><th>G数</th><th>平均なら</th>"
+            f"<th>空いている4〜5位の台に移る線</th><th>やめる線</th></tr>{rows}</table></div>"
+            "<p class='note'>「移る」は、移った先の見込みが0.4%以上高いとき（あと4000Gで約50枚の差）だけにしています。"
+            "移れる台が無いときは、やめる線までは続けてください。数字は毎週、この店のデータから計算し直します。</p>"
+            + sim + js)
 
 
 GOAL_WORD = {"plus": "プラス終了", "rank": "プラス終了", "high": "高設定っぽい"}
@@ -454,10 +595,10 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
     if sysinfo:
         st = next((x for x in (sysinfo.get("summary") or {}).get("strategies", []) if x["period"] == "全期間"), None)
         r_ = {x["label"]: x for x in st["rows"]} if st else {}
-        t1, al = r_.get("毎日行く・予想1位の台"), r_.get("毎日行く・適当な台（全台平均）")
+        t3, al = r_.get("毎日行く・予想上位3台のどれか"), r_.get("毎日行く・適当な台（全台平均）")
         boxes = [(f"{n_units}台", "予想の対象台数"), boxes[1], (f"{model.n_days}日分", "学習に使ったデータ")]
-        if t1 and al:
-            boxes.append((_coins(t1["pay"]), f"予想1位の台・8000G打った場合の平均（過去{st['days']}日の答え合わせ・全台平均{_coins(al['pay'])}）"))
+        if t3 and al:
+            boxes.append((_coins(t3["pay"]), f"予想上位3台・8000G打った場合の平均（過去{st['days']}日の答え合わせ・全台平均{_coins(al['pay'])}）"))
     if info_line.startswith("iPhoneからの最終受信: "):
         rest = info_line.split(": ", 1)[1]
         when, _, msg = rest.partition("（")
@@ -675,7 +816,7 @@ def build(model: M.Model, pred: pd.DataFrame, target: Date, hall_name: str, top_
            f"<title>ハナハナ予想 {target:%m/%d}</title><style>{CSS}</style></head><body><div class='wrap'>"
            f"{head}{status}{warn_html}{daysec}<h2>台別ランキング</h2>"
            + ("" if sysinfo else f"<p class='note'>{E(factor_note(model))}</p>")
-           + f"{table}{mapsec}{judgesec}{check_section(hist, pred_dir, target)}"
+           + f"{table}{mapsec}{quit_section((sysinfo or {}).get('quit'))}{judgesec}{check_section(hist, pred_dir, target)}"
            f"{habit}{btsec}{foot}</div></body></html>")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{target:%Y-%m-%d}.html"

@@ -317,6 +317,21 @@ def cmd_select(cfg, db, root: Path, force: bool = False) -> dict | None:
     return res
 
 
+def maybe_fit_prior(cfg, units, root: Path) -> None:
+    from . import quitrule as Q
+    p = root / "data" / "setting_prior.json"
+    try:
+        when = Date.fromisoformat(json.loads(p.read_text(encoding="utf-8")).get("when", "2000-01-01"))
+    except Exception:
+        when = Date(2000, 1, 1)
+    if (today_jst() - when).days >= 7:
+        try:
+            r = Q.fit_setting_prior(units, root, cfg["target"].get("keyword", "ハナハナ"))
+            log.info("この店の設定配分を推定し直しました: %s", r["weights"])
+        except Exception as e:
+            log.warning("設定配分の推定に失敗（前回の値のまま）: %s", e)
+
+
 def run_system(cfg, units, root: Path, target: Date) -> dict:
     """予想システム: 全台の点数、2年分の答え合わせ（週1回やり直し）、店の癖。"""
     from . import sysmodel as SM
@@ -342,7 +357,23 @@ def run_system(cfg, units, root: Path, target: Date) -> dict:
         research = json.loads((root / "data" / "research.json").read_text(encoding="utf-8"))
     except Exception:
         research = {}
-    return {"pred": pred, "summary": summ, "research": research, "habits": SM.habits(d)}
+    if summ.get("buckets") and "pay_s" not in summ["buckets"][0]:
+        summ["buckets"] = SM.smooth_buckets(summ["buckets"])
+    quit_info = {}
+    try:   # 続けるか・移るか・やめるかの計算機（今日の日の強さも見込みに入れる）
+        from . import daystrength as DS
+        from . import quitrule as Q
+        ds = DS.estimate(d[d["obs"]], target, ev)
+        delta = float(ds["today"]["delta"]) if ds else 0.0
+        params = Q.page_params(units, summ, delta, kw)
+        try:
+            qr = json.loads((root / "data" / "quit_research.json").read_text(encoding="utf-8"))
+        except Exception:
+            qr = {}
+        quit_info = {"params": params, "table": Q.quick_table(params), "research": qr, "margin": Q.MOVE_MARGIN}
+    except Exception as e:
+        log.warning("撤退判断の準備に失敗: %s", e)
+    return {"pred": pred, "summary": summ, "research": research, "habits": SM.habits(d), "quit": quit_info}
 
 
 def load_methods(root: Path) -> dict:
@@ -452,6 +483,8 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
         (out / "index.html").write_text(page, encoding="utf-8")
         return None
     s = C.model_settings(cfg)
+    if cfg["predict"].get("method", "system") == "system":
+        maybe_fit_prior(cfg, units, root)      # この店の設定配分（差枚の計算と撤退判断に使う）を週1回推定し直す
     m = M.train(units, hall, s)
     pred = M.predict(m, target)
     if cfg["predict"].get("method", "system") == "system":
