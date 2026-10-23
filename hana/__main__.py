@@ -335,9 +335,18 @@ def maybe_fit_prior(cfg, units, root: Path) -> None:
 def run_system(cfg, units, root: Path, target: Date) -> dict:
     """予想システム: 全台の点数、2年分の答え合わせ（週1回やり直し）、店の癖。"""
     from . import sysmodel as SM
+    from . import layout as L
     kw = cfg["target"].get("keyword", "ハナハナ")
     ev = tuple(cfg["hall"].get("event_digits", [0, 5]))
-    d = SM.build(units, kw, ev, target=pd.Timestamp(target))
+    try:   # 台番号の付け直しがあれば、対応がつく台は過去の記録を新しい番号に引き継ぐ
+        units_sys, rn = L.renumber(units, kw)
+        for e in rn:
+            if e["kind"] == "renumber":
+                log.info("台番号の付け直しを検出（%s・%d台を引き継ぎ）", e["date"], e.get("linked", 0))
+    except Exception as e:
+        log.warning("台番号の付け直しの確認に失敗: %s", e)
+        units_sys = units
+    d = SM.build(units_sys, kw, ev, target=pd.Timestamp(target))
     pred = SM.predict_units(d, target)
     hp, sp = root / "data" / "system_history.csv", root / "data" / "system.json"
     try:
@@ -528,7 +537,8 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
         log.warning("環境の記録に失敗: %s", e)
     path = R.build(m, pred, target, cfg["hall"].get("name", ""), cfg["predict"].get("top_n", 10),
                    load_backtest(root), db.coverage(), root / "output",
-                   extra_warns=variation_note(units, s, system=bool(pred.attrs.get("system"))) + closed_notes(s, units, target) + status_warnings(root),
+                   extra_warns=variation_note(units, s, system=bool(pred.attrs.get("system"))) + closed_notes(s, units, target)
+                   + layout_notes(units, cfg, target) + status_warnings(root),
                    pred_dir=pred_dir, info_line=status_line(root))
     if cfg.get("storage") == "csv":   # 答え合わせ用に予想を保存
         pred_dir.mkdir(parents=True, exist_ok=True)
@@ -539,6 +549,16 @@ def cmd_predict(cfg, db, root: Path, target: Date, open_browser=False) -> Path |
     if open_browser:
         webbrowser.open((root / "output" / "latest.html").resolve().as_uri())
     return path
+
+
+def layout_notes(units, cfg, target) -> list[str]:
+    """最近の台の入れ替え・台番号の付け直しのお知らせ（45日間表示）。"""
+    try:
+        from . import layout as L
+        return L.notes(units, cfg["target"].get("keyword", "ハナハナ"), target)
+    except Exception as e:
+        log.warning("入れ替えの確認に失敗: %s", e)
+        return []
 
 
 def variation_note(units, s, system: bool = False) -> list[str]:

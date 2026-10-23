@@ -104,37 +104,48 @@ def _decayed(df: pd.DataFrame, key: list[str], cols: list[str], h: float | None)
     return pd.DataFrame(res, index=order).reindex(df.index).to_numpy()
 
 
+STINT_CAP = 120   # 入れ替え後の日数はここで打ち切り（データの最初から同じ機種の台もこの値）
+
+
 def add_features(d: pd.DataFrame) -> pd.DataFrame:
-    """すべて『その日より前』の情報だけで作る材料。"""
+    """すべて『その日より前』の情報だけで作る材料。
+    台の記録は「台番号で同じ機種が続いている期間（stint）」ごとにまとめる。台の入れ替えで機種が変わったら
+    記録を新しく始め、あとで同じ機種が同じ番号に戻ってきても、間が空いた前の記録は混ぜない。"""
     d = d.copy()
+    d = d.sort_values(["unit", "di"])
+    chg = (d["model"] != d.groupby("unit")["model"].shift(1)).astype(int)
+    d["stint"] = chg.groupby(d["unit"]).cumsum()
+    sf = d.groupby(["unit", "stint"])["di"].transform("min")
+    d["stint_age"] = np.where(d["stint"] > 1, (d["di"] - sf).clip(upper=STINT_CAP), STINT_CAP)
     for name, h in HALF_LIVES.items():
-        v = _decayed(d, ["unit", "model"], ["r", "inn"], h)
+        v = _decayed(d, ["unit", "stint"], ["r", "inn"], h)
         d[f"ur_{name}"], d[f"ui_{name}"] = v[:, 0], v[:, 1]
         v = _decayed(d, ["unit"], ["r", "inn"], h)          # 機種が変わっても同じ台番として
         d[f"pr_{name}"], d[f"pi_{name}"] = v[:, 0], v[:, 1]
     # 直近N営業日の差枚の合計（店が設定を上げ下げするときに見ていそうな数字）
-    d = d.sort_values(["unit", "model", "di"])
-    gm = d.groupby(["unit", "model"])
+    d = d.sort_values(["unit", "stint", "di"])
+    gm = d.groupby(["unit", "stint"])
     for n in SUM_WINDOWS:
         d[f"sd{n}"] = gm["diff"].transform(lambda s: s.shift(1).rolling(n, min_periods=1).sum()).fillna(0.0)
         d[f"sr{n}"] = gm["r"].transform(lambda s: s.shift(1).rolling(n, min_periods=1).sum()).fillna(0.0)
     for h in (3, 7, 14):
-        d[f"ed{h}"] = _decayed(d, ["unit", "model"], ["diff"], h)[:, 0]
-    # 前日（前の営業日）の同じ台
+        d[f"ed{h}"] = _decayed(d, ["unit", "stint"], ["diff"], h)[:, 0]
+    # 前日（前の営業日）の同じ台（入れ替えで機種が変わった日は、前の機種の結果は使わない）
     d = d.sort_values(["unit", "di"])
     g = d.groupby("unit")
-    same = (d["di"] - g["di"].shift(1)) == 1
+    same = ((d["di"] - g["di"].shift(1)) == 1) & (d["stint"] == g["stint"].shift(1))
     d["prev_pay"] = (g["r"].shift(1) / g["inn"].shift(1).clip(lower=1)).where(same)
     d["prev_games"] = g["games"].shift(1).where(same)
     d["prev_diff"] = g["diff"].shift(1).where(same)
     low = (d["diff"] <= -500).fillna(False).to_numpy()
     st = np.zeros(len(d))
     units = d["unit"].to_numpy()
+    sm = same.to_numpy()
     for i in range(1, len(d)):
-        if units[i] == units[i - 1] and same.iloc[i]:
+        if units[i] == units[i - 1] and sm[i]:
             st[i] = st[i - 1] + 1 if low[i - 1] else 0
     d["streak_low"] = st
-    d["g_m7"] = g["games"].transform(lambda s: s.shift(1).rolling(7, min_periods=3).mean())
+    d["g_m7"] = d.groupby(["unit", "stint"])["games"].transform(lambda s: s.shift(1).rolling(7, min_periods=3).mean())
     d = d.sort_values(["di", "unit"])
     # 機種×日の種類、機種全体（その日より前の累計）
     for key, nm in ((["model", "busy"], "md"), (["model"], "mm")):
@@ -166,8 +177,8 @@ def add_features(d: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- 台選びの方法
-NUM_FEATS = (["prev_pay", "prev_games", "prev_diff", "streak_low", "g_m7", "model_age", "edge", "udigit", "busy", "ev",
-              "holiday", "longhol", "wday"]
+NUM_FEATS = (["prev_pay", "prev_games", "prev_diff", "streak_low", "g_m7", "model_age", "stint_age", "edge", "udigit",
+              "busy", "ev", "holiday", "longhol", "wday"]
              + [f"ueb_{n}" for n in HALF_LIVES] + [f"ui_{n}" for n in HALF_LIVES]
              + [f"peb_{n}" for n in HALF_LIVES] + ["md_eb", "mm_eb"]
              + [f"sd{n}" for n in SUM_WINDOWS] + [f"sr{n}" for n in SUM_WINDOWS] + ["ed3", "ed7", "ed14"])
@@ -406,10 +417,16 @@ def build(units: pd.DataFrame, keyword: str, event_digits, target=None) -> pd.Da
 def explain_row(r) -> list[str]:
     """ランキングに出す、その台の主な材料。"""
     out = [str(r["model"]).split("‐")[0].split("-")[0]]
-    for n, lab in ((7, "直近7日"), (30, "直近30日")):
-        v = r.get(f"sd{n}")
-        if pd.notna(v):
-            out.append(f"{lab} {v:+,.0f}枚")
+    age = r.get("stint_age")
+    if pd.notna(age) and age < 30:      # 入れ替えで機種が変わってまだ日が浅い台
+        out.append(f"入替{int(age) + 1}日目")
+        if age > 0 and pd.notna(r.get("sd30")):
+            out.append(f"入替後 {r['sd30']:+,.0f}枚")
+    else:
+        for n, lab in ((7, "直近7日"), (30, "直近30日")):
+            v = r.get(f"sd{n}")
+            if pd.notna(v):
+                out.append(f"{lab} {v:+,.0f}枚")
     if pd.notna(r.get("prev_diff")):
         out.append(f"前日 {r['prev_diff']:+,.0f}枚")
     return out
@@ -426,7 +443,7 @@ def predict_units(d: pd.DataFrame, target) -> pd.DataFrame | None:
     out = te.copy()
     out["sys_score"] = m.score(te)
     out["why"] = [explain_row(r) for _, r in out.iterrows()]
-    return out[["unit", "model", "sys_score", "why", "sd7", "sd30", "prev_diff"]].reset_index(drop=True)
+    return out[["unit", "model", "sys_score", "why", "sd7", "sd30", "prev_diff", "stint_age"]].reset_index(drop=True)
 
 
 def backtest(d: pd.DataFrame, start="2025-03-01", refit_every: int = 14) -> pd.DataFrame:
