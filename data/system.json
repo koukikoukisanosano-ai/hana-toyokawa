@@ -1,5 +1,5 @@
 {
- "when": "2026-11-21",
+ "when": "2026-11-28",
  "method": "gbm",
  "n_days": 648,
  "strategies": [
